@@ -1,0 +1,8 @@
+*.sqlite
+*.log
+*.pyc
+*.ods
+*.odt
+/data
+/archives
+

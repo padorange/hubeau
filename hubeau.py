@@ -1,7 +1,7 @@
 #! /usr/bin/python2
 # -*- coding: utf-8 -*-
 
-__version__="0.8.0"
+__version__="0.9.1"
 __copyright__="Copyright 2010-2020, Pierre-Alain Dorange"
 __license__="BSD 2.0"		# voir https://en.wikipedia.org/wiki/BSD_licenses
 __author__="Pierre-Alain Dorange"
@@ -57,9 +57,11 @@ __contact__="pdorange@mac.com"
 		petites améliorations et gestion d'erreur (un peu plus de résilience)
 		améliorations affichage du graphique
 		amélioration des performances
+	0.9 : juin 2020
+		recherche de stations par département
+		recherche de stations par cours d'eau		
 
 	A Faire
-		Gestion d'erreur pour la lecture du fichier de configuration ini
 		Mise à jour des infos stations dans la base
 		Recherche de station
 		Incorporation carte OSM des stations du graphique
@@ -497,7 +499,7 @@ class Station(Base):
 					self.coursdeau_code=data['code_cours_eau']
 					self.coursdeau=data['libelle_cours_eau']
 					self.type=data['type_station']
-					self.actif=(data['en_service']=='True')
+					self.actif=data['en_service']
 				else:
 					print "erreur, il y a %d réponse(s) pour la station %s" % (len(jdata),self.id)
 			else:
@@ -1002,94 +1004,173 @@ class StationList(list):
 		path=os.path.join(config.imgpath,config.html)
 		webbrowser.open(path,autoraise=True)
 
+class StationRequest():
+	def __init__(self,config):
+		self.config=config
+
+	def do(self,request=None):
+		self.request=request
+		urlstation="http://hubeau.eaufrance.fr/api/v1/hydrometrie/referentiel/stations?libelle_cours_eau=%s&format=json&size=100"
+		url=urlstation % request
+		page=1
+		while url:
+			if _debug:
+				print "url (%d):" % page,url
+			r=requests.get(url,headers={'user-agent':user_agent})		# télécharge les données brutes depuis l'URL
+			if r.status_code<=206:
+				content=r.headers['content-type']
+				if 'json' in content:
+					json=r.json()				# convertir les données brutes en objet JSON
+					next=json["next"]
+					datas=json["data"]			# récupère la porton data du JSON
+					if _debug:
+						print "results:",len(datas)
+					for data in datas:
+						if _debug:
+							print "candidate:",data['code_station']
+						if data['en_service']:
+							s=Station(data['code_station'])
+							s.nom=data['libelle_station']
+							s.departement=int(data['code_departement'])
+							s.longitude=float(data['longitude_station'])
+							s.latitude=float(data['latitude_station'])
+							s.coursdeau_code=data['code_cours_eau']
+							s.coursdeau=data['libelle_cours_eau']
+							s.type=data['type_station']
+							s.actif=data['en_service']
+							s.showName(True)
+					page=page+1
+					url=next
+				else:
+					print "url:",url
+					print "Response is not a JSON",content
+			else:
+				print "url:",url
+				print "HTTP Status error :",r.status_code
+
 # -- Fonctions --------------------------------------------------------------------------------
+arguments={	'h':("help",None,None,"aide"),
+			'f':("find","<nom>",None,"cherche les stations se trouvant sur le cours d'eau"),
+			's':("station","<liste>",None,""),
+			't':("time","<d>","10","nombre de jours a représenter sur la graphique"),
+			'g':("show",None,"Non","Affiche le graphique dans le navigateur"),
+			'd':("database",None,"Non","Ne pas télécharger les mises à joru de données, utiliser la base de données locales"),
+			'm':("mix",None,"Non","Fusionne les données en un seul graphique"),
+			'i':("info",None,"Non","Affiche les informations des stations interrogées"),
+			'x':("debug",None,None,"Active le mode deboggage")
+		}
 
 def show_usage():
 	print "--------------------------------------------"
 	print __file__,__version__
-	print "\t",__copyright__
-	print "\tLicence:", __license__
-	print "Gestion, affichage et analyse des mesures de"
-	print "hauteur d'eau des stations de mesure du réseau"
-	print "français vigiecrues (suivi des cours d'eau)"
+	print "  ",__copyright__
+	print "  Licence:", __license__
+	print "Récupère les mesures de hauteur de cours d'eau"
+	print "depuis l'API HubEau hydrométrie."
+	print "Créer un graphique et une mise en page HTML"
 	print "--------------------------------------------"
 	print "options :"
-	print "\t-h		help	aide (ce message)"
-	print "\t-s		station	indique un code identifiant de station (défaut=R314001001 et R307001002)"
-	print "\t-t		time	nombre de jours a afficher"
-	print "\t-g		graphic	affiche le graphique des mesures (défaut=Non)"
-	print "\t-d		dbase	ne pas télécharger des dernières mesures, utiliser la base locale (défaut=Non)"
-	print "\t-m		merge	fusionne les graphiques en un seul (défaut=Oui)"
-	print "\t-i		info	affiche les informations des stations interrogées (défaut=Non)"
-	print "\t-u		update	forcer la mise à jour des données de la base"
+	for a in arguments:
+		(arg,attrb,default,help)=arguments[a]
+		if attrb:
+			arg+=":%s" % attrb
+		if default:
+			help+="(défaut=%s)" % default
+		print "  -%s (--%s)\t%s" % (a,arg,help)
 	print "--------------------------------------------"
 	print 
 
 # -- Démarrage --------------------------------------------------------------------------------
 
 def main(argv):
+	global _debug
+
 	# 1. initialise et charger les paramètres '.INI)
 	config=Config()
 	# 2. charger les données (stations et mesures)
 	db=DataBase(config)
 	dbStationlist=db.load(config.idList)
-	# 3. charger les paramètres de la CLI (command line interface=
+	# 3. charger les paramètres de la CLI (command line interface)
+	shortList=""	# chaine avec les arguments courts (1 lettre, suivi de : si valeur a passer)
+	longList=[]		# les des noms d'arguments long (suivi de = si valeur à passer)
+	for a in arguments:
+		(arg,attrb,default,help)=arguments[a]
+		if attrb:
+			a+=':'
+			arg+='='
+		shortList+=a
+		longList.append(arg)
 	idList=[]
+	search=None
 	try: 
-		opts,args=getopt.getopt(argv,"hgdiums:t:",["help","show","download","info","update","mix","station=","time="])
+		opts,args=getopt.getopt(argv,shortList,longList)
 	except:
 		show_usage()
 		sys.exit(2)
 	for opt,arg in opts:
+		opt=opt.replace('-','')
 		if _debug:
 			print opt,":",arg
-		if opt in ("-h","--help"):
+		option=None
+		for a in arguments:
+			(arg,attrb,default,help)=arguments[a]
+			if opt in (a,arg):
+				option=a
+		if option=="h":
 			show_usage()
 			exit()
-		elif opt in ("-s","--station"):
+		elif option=="s":
 			idList.append(arg)
-		elif opt in ("-g","--show"):
+		elif option=="g":
 			config.show=True
-		elif opt in ("-d","--download"):
+		elif option=="d":
 			config.download=False
-		elif opt in ("-i","--info"):
+		elif option=="f":
+			search=arg
+		elif option=="i":
 			config.info=True
-		elif opt in ("-t","--time"):
+		elif option=="t":
 			config.plotdays=float(arg)
-		elif opt in ("-m","--mix"):
+		elif option=="m":
 			config.mix=True
+		elif option=="x":
+			_debug=True
 		else:
 			print "ERREUR : paramètre %d non géré" % opt
 	if len(idList)==0:	# si aucune stations dans la CLI, charger la config par défaut (.INI)
 		idList=config.idList
-
-	if not os.path.exists(config.imgpath):
-		os.mkdir(config.imgpath)
-	if os.path.exists(config.imgpath):			# vérifier l'existance des chemins de sauvegarde
-		if os.path.isdir(config.imgpath):
-			# 4. charger les dernières données des stations (hubeau)
-			print "Gestion des stations demandées :"
-			stationList=StationList()
-			for item in idList :				# parcourir les stations candidates et mettre en liste les stations avec données
-				station=Station(item)
-				for s in dbStationlist:
-					if s.id==item:				# si la station et déjà dans la base de données reprendre celle-ci (avec les données)
-						station=s
-						break
-				if station.getStation(config):		# charge les nouvelles données et mettre à jour
-					stationList.append(station)		# ajouter à la liste des stations gérées (test existance intégré)
-			# 5. Créer la page HTML et le ou les graphiques associés
-			stationList.generateHTML(config)	# créer le fichier HTMl de la liste des stations demandées
-			if config.show:
-				stationList.show(config)
-			# 6. Mise à jour des données de la base de données locales
-			db.store(stationList)	# mémoriser les mises à jour
-		else:
-			print "erreur : le chemin de sauvegarde n'est pas vers un répertoire"
-			print "\t",config.imgpath
+	# oriente l'exécution selon les options choisies
+	if search:	# recherche de stations
+		request=StationRequest(config)
+		request.do(search)
 	else:
-		print "erreur : le chemin de sauvegarde n'existe pas"
-		print "\t",config.imgpath
+		if not os.path.exists(config.imgpath):		# créer le dosier pour sauvegarde les HTML et images
+			os.mkdir(config.imgpath)
+		if os.path.exists(config.imgpath):			# vérifier l'existance des chemins de sauvegarde
+			if os.path.isdir(config.imgpath):
+				# 4. charger les dernières données des stations (hubeau)
+				print "Gestion des stations demandées :"
+				stationList=StationList()
+				for item in idList :				# parcourir les stations candidates et mettre en liste les stations avec données
+					station=Station(item)
+					for s in dbStationlist:
+						if s.id==item:				# si la station et déjà dans la base de données reprendre celle-ci (avec les données)
+							station=s
+							break
+					if station.getStation(config):		# charge les nouvelles données et mettre à jour
+						stationList.append(station)		# ajouter à la liste des stations gérées (test existance intégré)
+				# 5. Créer la page HTML et le ou les graphiques associés
+				stationList.generateHTML(config)	# créer le fichier HTMl de la liste des stations demandées
+				if config.show:
+					stationList.show(config)
+				# 6. Mise à jour des données de la base de données locales
+				db.store(stationList)	# mémoriser les mises à jour
+			else:
+				print "erreur : le chemin de sauvegarde n'est pas vers un répertoire"
+				print "\t",config.imgpath
+		else:
+			print "erreur : le chemin de sauvegarde n'existe pas"
+			print "\t",config.imgpath
 
 if __name__ == '__main__' :
 	main(sys.argv[1:])
