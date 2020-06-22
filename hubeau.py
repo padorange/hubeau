@@ -58,12 +58,11 @@ __contact__="pdorange@mac.com"
 		améliorations affichage du graphique
 		amélioration des performances
 	0.9 : juin 2020
-		recherche de stations par département
-		recherche de stations par cours d'eau		
+		amélioration gestion des arguments de la ligne de commande
+		recherche de stations multi-critères (cours d'eau, nom, commune, département)
 
 	A Faire
 		Mise à jour des infos stations dans la base
-		Recherche de station
 		Incorporation carte OSM des stations du graphique
 		Gestion d'autres API HubEau : température, piezomètre, qualité...
 		
@@ -1005,14 +1004,56 @@ class StationList(list):
 		webbrowser.open(path,autoraise=True)
 
 class StationRequest():
+	""" StationRequest : permet de construire un recherche de station de mesure
+		interroge l'API hubeau-hydro pour retrouver une ou plusieurs stations
+		- river : pour rechercher sur un cours d'eau
+		- station : pour rechercher par le nom de la station
+		- city : pour rechercher sur une commune
+		- departement : pour rechercher dans un département
+		On peut combiner les critères
+	"""
 	def __init__(self,config):
 		self.config=config
+		self.river=None
+		self.name=None
+		self.city=None
+		self.departement=None
 
-	def do(self,request=None):
-		self.request=request
-		urlstation="http://hubeau.eaufrance.fr/api/v1/hydrometrie/referentiel/stations?libelle_cours_eau=%s&format=json&size=100"
-		url=urlstation % request
+	def do(self,river=None,station=None,city=None,departement=None):
+		self.river=river
+		self.name=station
+		self.city=city
+		self.departement=departement
+		baseurl="http://hubeau.eaufrance.fr/api/v1/hydrometrie/referentiel/stations"
+		finalurl="format=json&size=100"
+		requesturl=""
+		separator="?"
+		if self.river:
+			if _debug:
+				print "recherche par cours d'eau:",self.river
+			requesturl+=separator+"libelle_cours_eau=%s" % self.river
+			separator="&"
+		if self.name:
+			if _debug:
+				print "recherche par libellé:",self.name
+			requesturl+=separator+"libelle_station=%s" % self.name
+			separator="&"
+		if self.city:
+			if _debug:
+				print "recherche par code commune:",self.city
+			requesturl+=separator+"code_commune_station=%s" % self.city
+			separator="&"
+		if self.departement:
+			if _debug:
+				print "recherche par code département:",self.departement
+			requesturl+=separator+"code_departement=%s" % self.departement
+			separator="&"
+		if len(requesturl)>0:
+			url=baseurl+requesturl+separator+finalurl
+		else:
+			url=None
 		page=1
+		nb=0
 		while url:
 			if _debug:
 				print "url (%d):" % page,url
@@ -1039,6 +1080,7 @@ class StationRequest():
 							s.type=data['type_station']
 							s.actif=data['en_service']
 							s.showName(True)
+							nb+=1
 					page=page+1
 					url=next
 				else:
@@ -1047,11 +1089,16 @@ class StationRequest():
 			else:
 				print "url:",url
 				print "HTTP Status error :",r.status_code
+		if nb<1:
+			print "Aucun résultat"
 
 # -- Fonctions --------------------------------------------------------------------------------
 arguments={	'h':("help",None,None,"aide"),
-			'f':("find","<nom>",None,"cherche les stations se trouvant sur le cours d'eau"),
-			's':("station","<liste>",None,""),
+			'f':("findriver","<nom>",None,"cherche les stations se trouvant sur le cours d'eau"),
+			'n':("findname","<nom>",None,"cherche les stations dont le nom correspond"),
+			'c':("findcity","<nom>",None,"cherche les stations d'une commune (code INSEE)"),
+			'e':("finddep","<nom>",None,"cherche les stations d'un département (code INSEE)"),
+			's':("station","<liste>",None,"liste des codes stations a afficher"),
 			't':("time","<d>","10","nombre de jours a représenter sur la graphique"),
 			'g':("show",None,"Non","Affiche le graphique dans le navigateur"),
 			'd':("database",None,"Non","Ne pas télécharger les mises à joru de données, utiliser la base de données locales"),
@@ -1101,7 +1148,10 @@ def main(argv):
 		shortList+=a
 		longList.append(arg)
 	idList=[]
-	search=None
+	riversearch=None
+	namesearch=None
+	citysearch=None
+	depsearch=None
 	try: 
 		opts,args=getopt.getopt(argv,shortList,longList)
 	except:
@@ -1113,20 +1163,28 @@ def main(argv):
 			print opt,":",arg
 		option=None
 		for a in arguments:
-			(arg,attrb,default,help)=arguments[a]
-			if opt in (a,arg):
+			(ida,attrb,default,help)=arguments[a]
+			if opt in (a,ida):
 				option=a
 		if option=="h":
 			show_usage()
 			exit()
 		elif option=="s":
-			idList.append(arg)
+			al=arg.split(",")
+			for a in al:
+				idList.append(a)
 		elif option=="g":
 			config.show=True
 		elif option=="d":
 			config.download=False
 		elif option=="f":
-			search=arg
+			riversearch=arg
+		elif option=="n":
+			namesearch=arg
+		elif option=="c":
+			citysearch=arg
+		elif option=="e":
+			depsearch=arg
 		elif option=="i":
 			config.info=True
 		elif option=="t":
@@ -1136,13 +1194,19 @@ def main(argv):
 		elif option=="x":
 			_debug=True
 		else:
-			print "ERREUR : paramètre %d non géré" % opt
+			print "ERREUR : paramètre",opt,"non géré"
 	if len(idList)==0:	# si aucune stations dans la CLI, charger la config par défaut (.INI)
 		idList=config.idList
 	# oriente l'exécution selon les options choisies
-	if search:	# recherche de stations
+	if riversearch or namesearch or citysearch or depsearch:	# recherche de stations 
+		if _debug:
+			print "recherche"
+			print" (cours d'eau):",riversearch
+			print " (libellé):",namesearch
+			print " (commune):",citysearch
+			print " (département):",depsearch
 		request=StationRequest(config)
-		request.do(search)
+		request.do(river=riversearch,station=namesearch,city=citysearch,departement=depsearch)
 	else:
 		if not os.path.exists(config.imgpath):		# créer le dosier pour sauvegarde les HTML et images
 			os.mkdir(config.imgpath)

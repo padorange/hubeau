@@ -3,7 +3,7 @@ hubeau.py
 Licence : BSD 2.0
 Copyright, version et historique : voir hubeau.py
 ---------------------------------------------------------------------------
-Script Python permettant d'interroger l'API publique hubeau (hygrométrie)
+Script Python permettant d'interroger l'API publique hubeau (hydrométrie)
 
 Permet de suivre les mesures de hauteur des cours d'eau diffusée par l'API HubEau :
 	- Télécharge les dernières mesures (API HubEau via json)
@@ -27,13 +27,50 @@ Aucune interface GUI, utilisable depuis la ligne de commande (CLI)
 Ce logiciel est destinée a être utilisé sous forme de tache de fond système (ex. Cron)
 ou lancer manuellement afin de mettre à jour en temps réel les graphiques de hauteurs de 
 cours d'eau des stations de mesures surveillées et affichés dans un fichier HTML.
+ou faire une recherche de stations pour trouver les stations intéressantes.
 
 -- interface CLI ----------------------------------------------------------
-Sans paramètre, le script prend les données dans le fichier de configuration .INI
-C'est la solution a privilégier pour un usage en automatique.
+Le script fonctionne sous 3 modes :
+
+* mode automatique
+	Sans aucun paramètre le script utilise le fichier de configuration (hubeau.ini) et réalise
+	les opérations de mise à jour et d'affichage des courbes de suivi des cours d'eau paramétrées
+	exemple : 
+		python hubeau.py
+
+* mode semi-automatique
+	Avec l'argument -s on précise les stations a interroger et à afficher
+	Dans uen liste avec la virgule comem séparateur
+
+	exemples :
+	voir les mesures à Paris des dernières 24 heures
+		python hubeau.py -sF700000103 -t24	
+	voir mesures à Toulouse des dernièrs 10 jours (240 heures)	
+		python hubeau.py -sO200004001 -t240	
+	voir et comparer la situation à Bordeaux et Tarascon sur les dernières 48 heures
+		python hubeau.py -sO972001001,V720001002 -t48
+
+* mode recherche station
+	Avec les arguments -f -n -c et -d on précise les critères de recherche de stations
+	Ce qui permet de trouver les stations locales pour paramétrer le fichier hubeau.ini
+
+	exemples :
+	rechercher les stations du fleuve Garonne
+		python hubeau.py -f Garonne
+	rechercher les stations du département de la Charente (16)
+		python hubeau.py -e 16
+	rechercher les stations de la ville de Bordeaux (code INSEE 33063)
+		python heubeau.py -c 33063
+	rechercher les stations du fleuve Loire dans le département 37 :
+		python hubeau.py -f Loire -e 37
 
 Paramètres de ligne de commande :
-	-s permet d'indiquer une station de mesure (on peut le répéter pour interroger plusieurs stations)
+	-h affiche l'aide
+	-f permet une recherche des stations sur un cours d'eau
+	-n permet une recherche à partir du nom des stations (contient généralement le nom du cours d'eau et de la commune)
+	-c permet une recherche selon le code INSEE d'une commune
+	-e permet une recherche selon le code d'un département
+	-s permet d'indiquer une ou plusieurs station(s) de mesure
 		voir la classe Station (plus bas) pour plus de détails sur les stations et leurs identifiants		
 	-t permet de préciser les données a afficher dans la graphiques (en jours)
 		chaque station propose environ les 30 derniers jours de mesure
@@ -43,29 +80,23 @@ Paramètres de ligne de commande :
 	-d permet de télécharger les dernières mesures (par défaut)
 	-i permet d'afficher les informations des stations interrogées
 
-exemple :
-	voir les mesures à Paris des dernières 24 heures
-		python hubeau.py -sF700000103 -t24	
-	voir mesures à Toulouse des dernièrs 10 jours (240 heures)	
-		python hubeau.py -sO200004001 -t240	
-	voir et comparer la situation à Bordeaux et Tarascon sur les dernières 48 heures
-		python hubeau.py -sO972001001 -sV720001002 -t48
-
--- Sans paramètres CLI (fichier hubeau.ini) ---------------------------------
+-- fichier de configuration (hubeau.ini) ---------------------------------
 Sans paramètres CLI, le script va utiliser la configuration dans le fichier hubeau.ini
-C'est l'usage le plus courant pour surveiller les cours d'eau près de chez soi.
 
 Le fichier hubeau.ini par défaut est configuré pour surveiller 4 stations 
 sur le fleuve Charente (16) et met en valeur la station de mesure de la ville de Cognac.
+C'est un choix qui correspond à mon propre usage (j'habite dans ce coin).
 
-Voir le fichier ini avec ses commentaires et le source de la classe COnfig pour les détails.
+Voir le fichier ini avec ses commentaires et le source de la classe Config pour les détails.
 
 -- Trouver les identifiants de stations ---------------------------------------
-Pour trouver les numéros des stations qui vous intéresse, le plus simple 
-est d'utiliser le site internet : https://www.vigicrues.gouv.fr/
-D'utiliser son interface graphique pour trouver la ou les stations qui vous intéresse
-Lorsque vous êtes sur la page d'une station, l'onglet "Info" vous permet de visualiser son identifiant
+Pour trouver les numéros des stations qui vous intéresse, vous pouvez utiliser l'interface CLI 
+du script ou utiliser le site internet : https://www.vigicrues.gouv.fr/
 
+Pour les paramètres de l'interface CLI de recherche voir plus haut "Interface CLI"
+
+Site internet Vigicrues :
+Lorsque vous êtes sur la page d'une station, l'onglet "Info" vous permet de visualiser son identifiant
 Les identifiants de station sont des codes uniques commençant par une elttre suivi de 9 chiffres.
 ex : la station de Cognac (16) est identifier par : R314001001
 Chaque station a une fréquence de mesures qui peut varier de 5 à 30 minutes.
@@ -75,26 +106,27 @@ HubEau est un service (API) de diffusion de données publiques de Eau France.
 EauFrance est un service public d'information sur l'eau.
 Basé sur le dictionnaire de référence SANDRE
 En savoir plus : 
- EauFrance
+ EauFrance : https://www.eaufrance.fr/
  HubEau : https://hubeau.eaufrance.fr
  Généralités API : https://hubeau.eaufrance.fr/page/apis
+ Sandre : http://www.sandre.eaufrance.fr/
 
 API Hydrométrie
 ===============
 Cet API est mise à jour à partie des données PHyC toutes les 2 minutes sur les dernières 24 heures.
-Comprend un historique de 1 mois.
+Comprend un historique de données de 1 mois.
 Le script HubEau conserve un historique plus long dans sa base de données locale.
 
 API Hydrométrie : https://hubeau.eaufrance.fr/page/api-hydrometrie
 Référenciel Hydrométrie : http://www.sandre.eaufrance.fr/notice-doc/r%C3%A9f%C3%A9rentiel-hydrom%C3%A9trique-3
 
 Données disponibles :
-	Sites : tronçon d'un cours d'eau ou les observations sont homogènes et comparables.
-	Stations : station d'observation sur un site
+	Sites : tronçon d'un cours d'eau ou les observations sont homogènes et comparables (non utilisé par le script).
+	Stations : station d'observation d'un cours d'eau (appartient à un site)
 	Observations : les observations d'une station
 
 Les données sont disponibles dans plusieurs formats : CSV, JSON, etc...
-Les données retournées sont paginés, chaque page retourne un bloc de données avec unc hamp pour indiquer si il y a une suite.
+Les données retournées sont paginées, chaque page retourne un bloc de données avec un champ pour indiquer si il y a une suite.
 Taille maximale d'une page : 5000
 Code retour de requête :
 	200 : OK toutes les réponses sont présentes
@@ -106,9 +138,9 @@ Code retour de requête :
 	500 : erreur interne du serveur
 
 Stations
-Les stations appartienne a un site, sont identifié par un identifiant unique et contienne des informations géographique.
-	code_station : code station
-	libelle_station : nom de la station en clair
+Les stations appartiennent a un site et sont identifiés par un identifiant unique et contiennent des informations géographique.
+	code_station : code station unique selon référentiel
+	libelle_station : nom de la station en clair, contient généralement le nom du cours d'eau et de la commune
 	code_site : code du site
 	libelle_site : nom du site en clair
 	code_commune_station : code de la commune ou se trouve la station (INSEE)
@@ -120,13 +152,13 @@ Les stations appartienne a un site, sont identifié par un identifiant unique et
 	coordonnee_x_station
 	coordonnee_y_station
 	code_projection
-	longitude :
-	latitude :
+	longitude : position géographique de la station
+	latitude : position géographique de la station
 	influence_locale_station
 	commentaire_station
 	
 Mesures
-Les dates sont exprimées UTC au format ISO 8601
+Les dates sont exprimées UTC au format ISO 8601 : https://fr.wikipedia.org/wiki/ISO_8601
 Les hauteurs d'eau (H) sont exprimées en millimètres (mm)
 Les débits (Q) sont exprimés en litre par seconde (l/s) : non utilisé par le script
 
@@ -134,9 +166,5 @@ Les débits (Q) sont exprimés en litre par seconde (l/s) : non utilisé par le 
 Utilisation de l'API hydrométrie par le script HubEau :
 Le format de données utilisé : JSON
 La notion de site n'est pas géré, seul sont utilisés Station et Observation
-Taille des pages de donnes : 400 par défaut
-Le script ne fait aucune recherche de stations a ce stade, 
-	les identifiants de station doivent être connu (voir chapitre "Trouver une station" plus haut.
-
-
+Taille des pages de donnees : 400 par défaut
 
