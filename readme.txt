@@ -9,10 +9,11 @@ Permet de suivre l'évolution "temps réel" des hauteurs des cours d'eau frança
 Permet de suivre les mesures de hauteur des cours d'eau diffusée par l'API HubEau :
 	- Télécharge les dernières mesures (API HubEau via le format json)
 	- Stocke les mesures en local (via sqlite + sqlalchemy)
-	- Permet de faire des graphiques (via matplotlib)
+	- Permet de mettre des graphiques l'historique des hauteur d'eau (via matplotlib)
 	- Génère une page HTML5+CSS+Javascript de suivi des stations de mesures (via ElementTree)
+	- Intègre une carte des stations sur la page HTML via Leaflet et OpenStreetMap
 
-Langage : Python 2.7
+Langage : Python 3.7 ou 2.7 (+HTML5, CSS et Javascript pour la page de résultat)
 Licence : BSD-3-Clause (ou BSD 2.0), voir https://en.wikipedia.org/wiki/BSD_licenses
 	Copyright (c) 2010-2021, Pierre-Alain Dorange
 	All rights reserved.
@@ -41,7 +42,7 @@ Licence : BSD-3-Clause (ou BSD 2.0), voir https://en.wikipedia.org/wiki/BSD_lice
 
 ---------------------------------------------------------------------------
 
--- Modules spécifiques utilisés -------------------------------------------
+-- Modules spécifiques utilisés (à installer)------------------------------
 requests 2.21 (module python à installer : https://requests.readthedocs.io/en/master/)
 	permet une interface simple pour interagir avec le protocole HTTP ("HTTP for humans")
 	Licence Apache2 : https://requests.readthedocs.io/en/master/user/intro/#apache2-license
@@ -50,14 +51,14 @@ MatPlotLib 2.2.x (module python à installer : https://matplotlib.org/)
 	permet de créer des graphiques à partir de données (ici mesures de hauteur d'eau)
 	Licence PSF, compatible BSD : https://matplotlib.org/users/license.html
 	Copyright 2019 Matplotlib Development Team
-SQLAlchemy 1.3.x (module à installer : https://www.sqlalchemy.org/)
+SQLAlchemy 1.4.x (module à installer : https://www.sqlalchemy.org/)
 	permet de mettre en relation direct des objets python et une structure SQL
 	Licence MIT : https://www.sqlalchemy.org/download.html#license
 	Copyright 2005-2021 SQLAlchemy authors and contributors
 
 -- Outils additionnels (utilisés par la page HTML) ------------------------
 OpenStreetMap ou OSM (https://www.openstreetmap.org/)
-	carte libre mondiale, utilisation du rendu xxx, via la librairie leaflet
+	carte libre mondiale, utilisation du rendu de base OSM, via la librairie leaflet
 	Licence ODbL : https://opendatacommons.org/licenses/odbl/summary/
 	Copyright OpenStreepMap contributors
 Leaflet 1.7.1 (https://leafletjs.com/)
@@ -72,18 +73,26 @@ leaflet-color-markers (https://github.com/pointhi/leaflet-color-markers)
 
 -- Utilisation ------------------------------------------------------------
 Aucune interface GUI, utilisable depuis la ligne de commande (CLI).
-Ce logiciel est destinée a être utilisé sous forme de tache de fond système (ex. Cron) ;
-dans cet usage de base le logiciel utilise kles données du fichier de configration hubeau.ini
-Ou de lancer manuellement afin de mettre à jour en temps réel les graphiques de hauteurs de 
-cours d'eau des stations de mesures surveillées et affichés dans un fichier HTML.
-L'interface CLI permet aussi de faire des recherches de stations dans l'API HubEau
-ou d'afficher les données de stations spécifiques.
+Ce logiciel est destinée a être utilisé sous forme de tache de fond système (ex. Cron) ou
+lancer manuellement dans la ligne de commande.
+Dans cet usage de base le logiciel utilise les données du fichier de configration hubeau.ini
+pour mettre à jour les données des stations configurées et afficher un fichier HTML
+présentant l'historique des mesures.
 
-Le script fonctionne sous 3 modes :
+L'interface CLI permet aussi de faire des recherches de stations dans l'API HubEau
+ou d'afficher les données de stations spécifiques. C'est le moyen de trouver les stations 
+qui pourrait vous intéresser localement puis de les configurer dans le fichier hubeau.ini
+
+Les stations de mesures du réseau HubEau sont identifiés par un code unique normalisé :
+	1 lettre suivi de 9 chiffres
+Les stations ont des données mises à jour entre 5 et 30 minutes.
+
+Le script fonctionne ainsi sous 3 modes :
 
 * mode automatique
-	Sans l'argument -s (pour préciser la ou les stations) le script utilise le fichier de configuration (hubeau.ini) et réalise
-	les opérations de mise à jour et d'affichage des courbes de suivi des cours d'eau qui y sont paramétrées
+	Sans l'argument -s (ne précise pas la ou les stations) le script utilise alors le fichier 
+	de configuration (hubeau.ini) et réalise les opérations de mise à jour et d'affichage 
+	des courbes de suivi des cours d'eau qui y sont paramétrées.
 	Exemples :
 		mettre à jour et afficher les données des stations paramétrées 
 			python hubeau.py
@@ -91,14 +100,14 @@ Le script fonctionne sous 3 modes :
 			python hubeau.py -d
 
 * mode semi-automatique
-	Avec l'argument -s on précise les stations a interroger et à afficher
+	Avec l'argument -s on précise la ou les stations a interroger et à afficher
 	Dans une liste avec la virgule comme séparateur
 	Exemples :
-		voir les mesures à Paris des dernières 24 heures
+		voir les mesures de la Seine à Paris-Austerlitz des dernières 24 heures
 			python hubeau.py -sF700000103 -t24	
-		voir mesures à Toulouse des dernièrs 10 jours (240 heures)	
+		voir mesures de la Garonne à Toulouse (Pont Neuf) des dernièrs 10 jours (240 heures)	
 			python hubeau.py -sO200004001 -t240	
-		voir et comparer la situation à Bordeaux et Tarascon sur les dernières 48 heures
+		voir et comparer la situation de la Garonne à Bordeaux et Tarascon sur les dernières 48 heures
 			python hubeau.py -sO972001001,V720001002 -t48
 
 * mode recherche station
@@ -110,30 +119,30 @@ Le script fonctionne sous 3 modes :
 		rechercher les stations du département de la Charente (16)
 			python hubeau.py -e 16
 		rechercher les stations de la ville de Bordeaux (code INSEE 33063)
-			python heubeau.py -c 33063
+			python hubeau.py -c 33063
 		rechercher les stations du fleuve Loire dans le département 37 :
 			python hubeau.py -r Loire -e 37
 
 Paramètres de ligne de commande :
 	-h affiche l'aide
-	-r permet une recherche des stations sur un cours d'eau
+	-r permet une recherche des stations sur un cours d'eau par son nom (ex. Seine, Loire...)
 	-n permet une recherche à partir du nom des stations (contient généralement le nom du cours d'eau et de la commune)
 	-c permet une recherche selon le code INSEE d'une commune
 	-e permet une recherche selon le code d'un département
 	-s permet d'indiquer une ou plusieurs station(s) de mesure
-		voir la classe Station (plus bas) pour plus de détails sur les stations et leurs identifiants		
+		voir la classe Station (plus bas) pour plus de détails sur les stations et leurs identifiants
 	-t permet de préciser la quantitié de données a afficher dans la graphiques (en jours)
 		chaque station propose environ les 30 derniers jours de mesure
 		chaque station a sa propre fréquence de mesure (variable de 5 à 60 minutes)
-	-g permet d'afficher le graphique de chaque station interrogée (GUI simple)
-	-m permet de réunir les données de toutes les stations dans un seul graphique
+	-g permet d'afficher le graphique de chaque station interrogée (actif par défaut)
+	-m permet de réunir les données de toutes les stations dans un seul graphique (actif par défaut)
 	-d permet de télécharger les dernières mesures (par défaut)
 	-i permet d'afficher les informations des stations interrogées
 
 -- fichier de configuration (hubeau.ini) ---------------------------------
-Sans paramètres CLI, le script va utiliser la configuration dans le fichier hubeau.ini
+Sans paramètres CLI, le script va utiliser le mode automatique, soit la configuration dans le fichier hubeau.ini
 
-Le fichier hubeau.ini par défaut est configuré pour surveiller 4 stations 
+Le fichier hubeau.ini par défaut 'livré) est configuré pour surveiller 4 stations 
 sur le fleuve Charente (16) et met en valeur la station de mesure de la ville de Cognac.
 C'est un choix qui correspond à mon propre usage (j'habite dans ce coin).
 
@@ -145,7 +154,8 @@ du script (voir plus haut 'interface CLI') ou utiliser le site internet : https:
 
 Site internet Vigicrues :
 Lorsque vous êtes sur la page d'une station, l'onglet "Info" vous permet de visualiser son identifiant
-Les identifiants de station sont des codes uniques commençant par une elttre suivi de 9 chiffres.
+Les identifiants de station sont des codes uniques commençant par une lettre suivi de 9 chiffres.
+Les identifiants de station font partie du dictionnaire national SANDRE
 ex : la station de Cognac (16) est identifier par : R314001001
 Chaque station a une fréquence de mesures qui peut varier de 5 à 30 minutes.
 
@@ -161,7 +171,7 @@ En savoir plus :
 
 API Hydrométrie
 ===============
-Cette API est mise à jour à partie des données PHyC toutes les 2 minutes sur les dernières 24 heures.
+Cette API est mise à jour à partir des données PHyC toutes les 2 minutes sur les dernières 24 heures.
 Comprend un historique de données de 1 mois pour chaque station.
 Le présent script HubEau peut conserver un historique plus long avec sa base de données locale.
 
@@ -173,7 +183,7 @@ Données disponibles :
 	Stations : station d'observation d'un cours d'eau (appartient à un site)
 	Observations : les observations d'une station
 
-Les données sont disponibles dans plusieurs formats : CSV, JSON, etc...
+Les données sont disponibles dans plusieurs formats : CSV, JSON (utilisé ici), etc...
 Les données retournées sont paginées, chaque page retourne un bloc de données avec un champ pour indiquer si il y a une suite.
 Taille maximale d'une page : 5000
 Code retour de requête :
@@ -187,7 +197,7 @@ Code retour de requête :
 
 Stations
 Les stations appartiennent a un site et sont identifiés par un identifiant unique et contiennent des informations géographique.
-	code_station : code station unique selon référentiel
+	code_station : code station unique selon référentiel SANDRE
 	libelle_station : nom de la station en clair, contient généralement le nom du cours d'eau et de la commune
 	code_site : code du site
 	libelle_site : nom du site en clair

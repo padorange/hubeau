@@ -3,6 +3,7 @@
 *.pyc
 *.ods
 *.odt
-/data
+/html
 /archives
+test.py
 

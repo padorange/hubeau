@@ -4,9 +4,8 @@
 # python 3 préparation (future)
 from __future__ import print_function
 from __future__ import division
-# sqlachemy : problèmes avec python3
 
-__version__="0.9.4"
+__version__="0.9.5"
 __copyright__="Copyright 2010-2021, Pierre-Alain Dorange"
 __license__="BSD-3-Clauses"		# voir https://en.wikipedia.org/wiki/BSD_licenses
 __author__="Pierre-Alain Dorange"
@@ -15,7 +14,7 @@ __contact__="pdorange@mac.com"
 """
 	hubeau.py
 	-----------------------------------------------------------------------------------------
-	Réalisé avec Python 2.7.x, testé sur Debian 10 & MacOS X 10.10
+	Réalisé avec Python 3.7.x / 2.7.x, testé sur Debian 10 & MacOS X 10.10
 	-----------------------------------------------------------------------------------------
 	Permet de suivre les mesures de hauteur des cours d'eau Français diffusée par l'API HubEau :
 		- Télécharge les dernières mesures (API HubEau + json)
@@ -30,14 +29,14 @@ __contact__="pdorange@mac.com"
 	All rights reserved.
 
 	-- Modules spécifiques à installer (licence, voir readme.txt) ----------------------------
-	requests 2.21 (https://requests.readthedocs.io/en/master/)
+	Requests 2.21 (https://requests.readthedocs.io/en/master/)
 	MatPlotLib 2.2.x (https://matplotlib.org/)
-	SQLAlchemy 1.3.x : (https://www.sqlalchemy.org/)
+	SQLAlchemy 1.4.x : (https://www.sqlalchemy.org/)
 
 	-- Modules spécifiques utilisés par la page HTML (licence, voir readme.txt) --------------
 	leaflet.js 1.7.x (https://leafletjs.com/)
 
-	-- Modules standards utilisés (Python 2.7.x) ---------------------------------------------
+	-- Modules standards utilisés (Python) ---------------------------------------------
 	sqlite : Base de données SQL locale mono-utilisateur
 	configparser : 	Gestion des fichier ini
 	ElementTree (xml.tree) : Création fichier html5
@@ -62,24 +61,30 @@ __contact__="pdorange@mac.com"
 		améliorations affichage du graphique
 		amélioration des performances
 	0.9 : juin-octobre 2020
-		amélioration gestion des arguments de la ligne de commande
+		amélioration gestion des arguments de la ligne de commande (par bascule)
 		recherche de stations multi-critères (cours d'eau, nom, commune, département)
 		ajout carte openstreetmap des stations mesurées et/ou résultats via leaflet.js
 	0.9.4 : janvier-avril 2021
 		ajout de marqueurs de couleurs sur carte avec couleurs correspondates au graphique
 		début préparation pour compatibilité python3
 		couleurs homogène entre les graphes et Leaflet
+	0.9.5 : mai 2021
+		compatibilité Python 2.7.x et 3.7.x
 
 	A Faire
-		étudier une meilleure intégration leaflet (actuellement en ligne) ?
-		Améliorer la gestion des paramètres optionnels par activation/désactivation
-			afficher la courbe
-			afficher les informations
-			afficher une analyse
-			améliorer gestion zoom pour la caret OSM (fitBounds marche pas)
-		Mise à jour des infos stations dans la base
-		Passer à Python3
+		Améliorer gestion zoom pour la caret OSM (fitBounds marche pas)
+		Mode recherche : 
+			afficher le résultat sur carte OSM
+			ne pas charger la base de données locale
+		Mise à jour des infos stations dans la base lors de chargement des données
+		Faire évoluer les librairies vers plus récents (request, sqlalchemy, matplotlib...)
 		Gestion d'autres API HubEau : température, piezomètre, qualité... ?
+		Option OSM pour afficher le cours d'eau sur la carte ?
+
+	Bug
+		option -g, affiche une carte avec la station
+		la recherche affiche une carte avec 1 seule station (la première à priori)
+		python hubeau.py -sO972001001,V720001002 : provoque une erreur d'index
 """
 
 # astuce unicode (Python 2.7.x) : permet de définir unicode comme encodage par défaut
@@ -99,12 +104,12 @@ if sys.version_info.major==2:	# python 2
 else:							# python 3
 	import configparser						# gestion fichier.INI (paramètres et configuration)
 import codecs					# gestion des encodages de fichier
-from xml.etree import ElementTree as ET	# module pour gérer le format XML (ici pour crée du HTML)
-import sqlalchemy				# modules d'abstraction SQL (ici utilisé pour stocker les données via SQLite)
-import sqlalchemy.orm			# mapper configuration ORM
-import sqlalchemy.ext.declarative	# extension ORM
+from xml.etree import ElementTree as ET		# module pour gérer le format XML (ici pour crée du HTML)
 
 # -- modules externes (dépendances à installer) -------------------------------------------------
+import sqlalchemy				# modules d'abstraction SQL (ici utilisé pour stocker les données via SQLite)
+import sqlalchemy.orm					# mapper configuration ORM
+import sqlalchemy.ext.declarative		# extension ORM
 								# matplotlib 2.x : librairie de création de graphes : https://matplotlib.org/
 import matplotlib.pyplot as plt			# module principal pour créer des graphes
 import matplotlib.dates as pltdates		# module pour gérer des dates dans les graphes
@@ -162,7 +167,10 @@ class Config():
 		# avec valeurs par défaut si erreur de chargement ou valeur non définie
 		config=configparser.RawConfigParser()
 		with codecs.open(default_config,'r',encoding='utf-8') as f:
-			config.readfp(f)
+			if sys.version_info.major==2:
+				config.readfp(f)
+			else:
+				config.read_file(f)
 		try:	# chemin pour la sauvegarde des résultats (images et html)
 			directory=config.get('data','dir')
 		except:
@@ -1035,12 +1043,20 @@ class StationList(list):
 			txt+="mymap.fitBounds(markers.getBounds().pad(0.5));"
 			script.text+=txt
 			body.append(script)
-
+		if _debug:
+			print("html/path",path)
+			print("html/data")
+			print(html)
 		with open(path,'w') as f:
 			f.write("<!DOCTYPE html>\n")	# ajout du doctype en première ligne
-			ET.ElementTree(html).write(f, encoding='utf-8',method='html')
+			if sys.version_info.major==2:
+				ET.ElementTree(html).write(f, encoding='utf-8',method='html')
+			else:
+				ET.ElementTree(html).write(f, encoding='unicode',method='html')
 
 	def showMap(self,config):
+		""" showMap : affiche sur une carte OSM l'emplacement des stations de la liste
+		"""
 		baseUrl="https://www.openstreetmap.org/?mlat=%.4f&mlon=%.4f&#map=%d/%.4f/%.4f"
 		station=self[0]
 		if station:
@@ -1054,6 +1070,45 @@ class StationList(list):
 		""" Lancer la navigateur pour ouvrir le fichier HTML avec les résultats """
 		path=os.path.join(config.imgpath,config.html)
 		webbrowser.open(path,autoraise=True)
+
+class HubEauHTML():
+	def __init__(self,config):
+		""" Création de la structure de base d'uen page HTML Hubeau avec header et un corps vide
+			L'entête inclus les styles CSS Hubeau et la librairie javascript Leaflet
+			
+			self.html
+			self.body
+		"""
+		self.config=config
+
+		self.html=ET.Element('html')
+		head=ET.Element('head')
+		self.html.append(head)
+		meta=ET.Element('meta',attrib={'charset':'UTF-8'})
+		head.append(meta)
+		title=ET.Element('title')
+		title.text=u"Suivi hauteur de la Charente via hubeau.eaufrance.fr"
+		head.append(title)
+		style=ET.Element('style')
+		style.text=config.css
+		head.append(style)
+		if config.map:
+			leafletSrcCSS='https://unpkg.com/leaflet@1.7.1/dist/leaflet.css'
+			leafletShaCSS='sha512-xodZBNTC5n17Xt2atTPuE1HxjVMSvLVW9ocqUKLsCC5CXdbqCmblAshOMAS6/keqq/sMZMZ19scR4PsZChSR7A=='
+			leafletSrcJS='https://unpkg.com/leaflet@1.7.1/dist/leaflet.js'
+			leafletShaJS='sha512-XQoYMqMTK8LvdxXYG3nZ448hOEQiglfqkJs1NOQV44cWnUrBc8PkAOcXy20w0vlaXaVUearIOBhiXZ5V3ynxwA=='
+			link=ET.Element('link', attrib={'rel':'stylesheet', 'href':leafletSrcCSS, 'integrity':leafletShaCSS, 'crossorigin':''})
+			head.append(link)
+			script=ET.Element('script', attrib={'src':leafletSrcJS, 'integrity':leafletShaJS, 'crossorigin':''})
+			head.append(script)
+		self.body=ET.Element('body')
+		self.html.append(body)
+	
+	def generate(self):
+		return
+
+	def write(self):
+		return
 
 class StationRequest():
 	""" StationRequest : permet de construire une recherche de station(s) de mesure
@@ -1147,17 +1202,17 @@ class StationRequest():
 			print("Aucun résultat")
 		return result
 
-# -- Fonctions --------------------------------------------------------------------------------
+# --  Aide  --------------------------------------------------------------------------------
 #			lettre-code / nom-long / type de valeur / valeur par défaut / aide
 arguments={	'h':("help",None,None,"aide"),
 			'r':("findriver","<nom>",None,"cherche les stations se trouvant sur le cours d'eau"),
 			'n':("findname","<nom>",None,"cherche les stations dont le nom correspond"),
-			'c':("findcity","<nom>",None,"cherche les stations d'une commune (code INSEE)"),
-			'e':("finddep","<nom>",None,"cherche les stations d'un département (code INSEE)"),
+			'c':("findcity","<nom>",None,"cherche les stations d'une commune par code INSEE"),
+			'e':("finddep","<nom>",None,"cherche les stations d'un département par code INSEE"),
 			's':("station","<liste>",None,"liste des codes stations a afficher"),
 			't':("time","<d>","10","nombre de jours a représenter sur la graphique"),
 			'g':("show",None,"Non","Affiche le graphique dans le navigateur"),
-			'd':("database",None,"Non","Ne pas télécharger les mises à joru de données, utiliser la base de données locales"),
+			'd':("database",None,"Non","Ne pas télécharger les mises à jour de données"),
 			'm':("mix",None,"Non","Fusionne les données en un seul graphique"),
 			'i':("info",None,"Non","Affiche les informations des stations interrogées"),
 			'o':("osm",None,"Non","Affiche la carte avec les stations localisées"),
@@ -1166,9 +1221,9 @@ arguments={	'h':("help",None,None,"aide"),
 
 def show_usage():
 	print("--------------------------------------------")
-	print(__file__,__version__)
-	print("  ",__copyright__)
-	print("  Licence:", __license__)
+	print("%s %s" %(__file__,__version__))
+	print("  %s" % __copyright__)
+	print("  Licence : %s" % __license__)
 	print("Récupère les mesures de hauteur de cours d'eau")
 	print("depuis l'API HubEau hydrométrie.")
 	print("Créer un graphique et une mise en page HTML")
@@ -1179,7 +1234,7 @@ def show_usage():
 		if attrb:
 			arg+=":%s" % attrb
 		if default:
-			help+="(défaut=%s)" % default
+			help+=" (défaut=%s)" % default
 		print("  -%s (--%s)\t%s" % (a,arg,help))
 	print("--------------------------------------------")
 	print()
@@ -1264,7 +1319,7 @@ def main(argv):
 	if len(idList)>maxGraph:
 		print("alerte : liste stations trop longue, max=",maxGraph)
 		idList=idList[:maxGraph]
-	# oriente l'exécution selon les options choisies
+	# 4. oriente l'exécution selon les options choisies
 	if search:	# recherche de stations 
 		if _debug:
 			print("recherche")
@@ -1276,13 +1331,13 @@ def main(argv):
 		stationList=request.do(river=riversearch,station=namesearch,city=citysearch,departement=depsearch)
 		if config.map:
 			stationList.showMap(config)
-	else:
+	else:	# pas de recherche, mettre à jour les données de(s) station(s)
 		if not os.path.exists(config.imgpath):		# créer le dosier pour sauvegarde les HTML et images
 			os.mkdir(config.imgpath)
 		if os.path.exists(config.imgpath):			# vérifier l'existance des chemins de sauvegarde
 			if os.path.isdir(config.imgpath):
-				# 4. charger les dernières données de chaque station de la liste requête (hubeau)
-				print("Gestion des stations demandées :")
+				# 4a. charger les dernières données de chaque station de la liste requête (hubeau)
+				print("Mise à jour des stations demandées :")
 				stationList=StationList()
 				for item in idList :				# parcourir les stations candidates et mettre en liste les stations avec données
 					station=Station(item)
@@ -1292,13 +1347,13 @@ def main(argv):
 							break
 					if station.getStation(config):		# charge les nouvelles données et mettre à jour
 						stationList.append(station)		# ajouter à la liste des stations gérées (test existance intégré)
-				# 5. Créer la page HTML et le ou les graphiques associés
+				# 4b. Créer la page HTML et le ou les graphiques associés
 				stationList.generateHTML(config)	# créer le fichier HTMl de la liste des stations demandées
 				if config.show:
 					stationList.show(config)
 				elif config.map:
 					stationList.showMap(config)
-				# 6. Mise à jour des données de la base de données locales
+				# 4c. Mise à jour des données de la base de données locales
 				db.store(stationList)	# mémoriser les mises à jour
 			else:
 				print("erreur : le chemin de sauvegarde n'est pas vers un répertoire")
