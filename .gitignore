@@ -1,0 +1,9 @@
+*.sqlite
+*.log
+*.pyc
+*.ods
+*.odt
+/html
+/archives
+test.py
+
