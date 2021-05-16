@@ -28,20 +28,20 @@ __contact__="pdorange@mac.com"
 	Copyright (c) 2010-2021, Pierre-Alain Dorange
 	All rights reserved.
 
-	-- Modules spécifiques à installer (licence, voir readme.txt) ----------------------------
+	-- Modules spécifiques à installer (licences : voir readme.txt) ---------------------------
 	Requests 2.21 (https://requests.readthedocs.io/en/master/)
 	MatPlotLib 2.2.x (https://matplotlib.org/)
 	SQLAlchemy 1.4.x : (https://www.sqlalchemy.org/)
 
-	-- Modules spécifiques utilisés par la page HTML (licence, voir readme.txt) --------------
+	-- Modules spécifiques utilisés par la page HTML (licence : voir readme.txt) --------------
 	leaflet.js 1.7.x (https://leafletjs.com/)
 
-	-- Modules standards utilisés (Python) ---------------------------------------------
+	-- Modules standards utilisés (Python) ----------------------------------------------------
 	sqlite : Base de données SQL locale mono-utilisateur
 	configparser : 	Gestion des fichier ini
 	ElementTree (xml.tree) : Création fichier html5
 
-	-- Historique -------------------------------------------------------------
+	-- Historique -----------------------------------------------------------------------------
 	Initialement développé pour suivre les crues (vigicrues.gouv.fr) 
 	puis étendu via l'api-hydrométrie du portail HubEau.
 
@@ -70,21 +70,20 @@ __contact__="pdorange@mac.com"
 		couleurs homogène entre les graphes et Leaflet
 	0.9.5 : mai 2021
 		compatibilité Python 2.7.x et 3.7.x
+		passage à SQLAlchemy 1.4.x
+		affichage résultats recherche sur une carte
+		optimisation démarrage : ne charger que les données nécessaires à la session
+		gestion de la limite des 30 jours de l'API HubEau
 
 	A Faire
-		Améliorer gestion zoom pour la caret OSM (fitBounds marche pas)
-		Mode recherche : 
-			afficher le résultat sur carte OSM
-			ne pas charger la base de données locale
 		Mise à jour des infos stations dans la base lors de chargement des données
 		Faire évoluer les librairies vers plus récents (request, sqlalchemy, matplotlib...)
 		Gestion d'autres API HubEau : température, piezomètre, qualité... ?
 		Option OSM pour afficher le cours d'eau sur la carte ?
 
 	Bug
-		option -g, affiche une carte avec la station
-		la recherche affiche une carte avec 1 seule station (la première à priori)
-		python hubeau.py -sO972001001,V720001002 : provoque une erreur d'index
+		python hubeau.py -sO972001001,V720001002 : provoque une erreur HubEau (return 400 : invalid request)
+			date debut = 2020-06-20
 """
 
 # astuce unicode (Python 2.7.x) : permet de définir unicode comme encodage par défaut
@@ -123,12 +122,14 @@ import requests					# module intelligent de gestion du protocole HTTP et JSON
 _debug=False				# active le mode debug
 _debug_update=False			# mode debug pour les mise à jour de données
 _debug_sql=False			# mode debug pour les appels SQL
-_verbose=False				# mode trace avec affichage de précisions
+_verbose=True				# mode trace avec affichage d'informations intermédiaires
 
 user_agent="%s/%s" % (__file__,__version__)
 
+# Nombre maximal de stations affichable sur un seul graphique
 maxGraph=6
-colorList=("blue","orange","green","violet","red","grey")
+# marqueurs colorés pour Leaflet : https://github.com/pointhi/leaflet-color-markers
+colorList=("blue","orange","green","violet","red","grey","gold","yellow","violet","black")
 
 default_directory="html"
 default_config="hubeau.ini"
@@ -136,7 +137,8 @@ default_css="""
 	body { background-color: lightgrey; }
 	.clearfix { overflow: auto; }
 	.plot { float: left; } 
-	#mapid { height: 400px; }
+	#datamapid { height: 400px; }
+	#searchmapid { height: 800px; }
 	#bid { background-color: lightblue; padding: 5px; margin: auto; }
 	#gid { box-shadow: 1px 2px 3px rgba(0, 0, 0, .5); margin: 5px; }
 	"""
@@ -197,7 +199,7 @@ class Config():
 			self.plotdays=config.getfloat('plot','days')
 		except:
 			self.plotdays=10.0
-		try:	# taille par défaut des données affichées (nombre de jours)
+		try:	# affichage carte dans le html
 			self.map=config.getboolean('plot','map')
 		except:
 			self.map=False
@@ -257,19 +259,24 @@ class Config():
 		except:
 			(w,h)=(10.0,3.0)
 		self.mixplotsize=(0.01*w,0.01*h)	# convert pixels to inches
-		if _debug: 
+		if _verbose: 
 			print(self)
 		return
+
+	def getHTMLPath(self):
+		return os.path.join(self.imgpath,self.html)
 
 	def __str__(self):
 		text="jours: %.1f" % self.plotdays
 		text+="\nrequête: %d" % self.datasize
+		text+="\nshow: %s" % self.show
+		text+="\nmap: %s" % self.map
 		return text
 
 class DataBase():
 	"""	Gestion globale de la base de données avec un chargement au début et sauvegarde à la fin
 		via la variable state de chaque objet 
-			state=0 	nouveau, sera ajouté à la base de données
+			state=0 	nouveau, sera ajouté à la base de données à la mise à jour
 			state=1		mise à jour, sera mis à jour dans la base de données
 			state=2		chargé, existe déjà ne sera ni mis à jour, ni ajouté
 	"""
@@ -283,16 +290,16 @@ class DataBase():
 	def load(self,idList=[]):
 		""" charger les données, pour les stations requises (idList) """
 		stations=StationList()
-		print("Chargement de la base de données (%d station(s))" % len(idList))
+		print("Chargement partiel de la base de données (%d station(s))" % len(idList))
 		for s in idList:	# pour chaque station
 			station=self.session.query(Station).filter(Station.id==s).one_or_none()
 			if station:
 				station.dbInit(2)
 				stations.append(station)
-				# requete MySQL pour les données de la staion s
+				# requete MySQL pour les données de la staion
 				results=self.session.query(StationData).filter(StationData.station==s).all()
 				if _verbose or _debug:
-					print("chargement de %d mesures(s)" % len(results))
+					print("chargement de %s (%d mesures(s))" % (station.getID(),len(results)))
 				# charger les données en mémoire
 				for r in results:
 					r.dbInit(2)
@@ -300,18 +307,22 @@ class DataBase():
 		return stations
 
 	def store(self,stations):
-		""" stocker les données de la liste stations """
+		""" stocker les données de la liste stations, suivant l'état 'state'
+				0 : nouvelle donnée a stocker dans la base de données
+				1 : mise à jour énce'ssire (non géré)
+				2 : déjà stocké, ne rien faire
+		"""
 		for station in stations:
-			if station.state==0:
+			if station.state==0:			# nécessite un ajout (station)
 				self.session.add(station)
 				self.session.commit()
 			for data in station.data:
-				if data.state==0:
+				if data.state==0:			# nécessite un ajout (station.data)
 					self.session.add(data)
 			self.session.commit()
 
 class StationData(Base):
-	""" Data: pour stocker les mesures des stations
+	""" StationData: pour stocker les mesures des stations en mémoire
 			id : identifiant de la station
 			t :	date-time de la mesure
 			v : valeur de la mesure
@@ -374,7 +385,7 @@ class Station(Base):
 	def __init__(self,id=-1):
 		""" initialise la structure """
 		self.id=id					# identifiant hubeau
-		self.nom=u""					# nom de la station de mesure (après interrogation)
+		self.nom=u""				# nom de la station de mesure (après interrogation)
 		self.type=u""				# type de station
 		self.departement=-1			# département ou se situe la station
 		self.longitude=0.0			# longitude de la station
@@ -420,7 +431,7 @@ class Station(Base):
 		return name	
 
 	def addData(self,data):
-		""" ajoute data à la liste existante et calcul les min/max au fur et à mesure """
+		""" ajoute data à la liste existante et calcule les min/max au fur et à mesure """
 		if data.t<self.x_lim[0]:
 			self.x_lim[0]=data.t
 		if data.t>self.x_lim[1]:
@@ -747,9 +758,13 @@ class Station(Base):
 
 		# 2. Récupère les mesures de la station (date+hauteur)
 		if config.download:
-			if len(self.data)>0:
+			if len(self.data)>0:	# extrait la dernière date des données locales
 				self.data.sort(key=lambda item: item.t)
 				date=self.data[-1].t
+				# hubeau API 1.1 n'autorise pas les dates inférieures à 1 mois
+				dt=datetime.datetime.now()-date
+				if dt.days>28:
+					date=None
 			else:
 				date=None
 			if _debug:
@@ -894,13 +909,14 @@ class StationList(list):
 		""" retourne les min/max globaux """
 		return (self.x_lim,self.y_lim)
 
-	def generateHTML(self,config):
+	def generateHTML(self,config,search=False):
 		""" Crée un fichier index.html dans le répertoire des images
 			et qui encapsule les graphes créés (images), permet un affichage des résultats
 			La création du fichier html est réalisée via le module ElementTree
 		"""
 		# étape 1 : préparation fichier HTML
 		path=os.path.join(config.imgpath,config.html)
+		path=config.getHTMLPath()
 		if _verbose or _debug:
 			print("Mise à jour du fichier HTML:",path)
 		date_fin=datetime.datetime.utcnow()
@@ -911,54 +927,74 @@ class StationList(list):
 			print("x_lim",x_lim)
 			print("y_lim",y_lim)
 		# étape 2 : génère le fichier HTML5+CSS+JS (en UTF-8)
-		html=ET.Element('html')
-		head=ET.Element('head')
-		html.append(head)
-		meta=ET.Element('meta',attrib={'charset':'UTF-8'})
-		head.append(meta)
-		title=ET.Element('title')
-		title.text=u"Suivi hauteur de la Charente via hubeau.eaufrance.fr"
-		head.append(title)
-		style=ET.Element('style')
-		style.text=config.css
-		head.append(style)
-		if config.map:
-			leafletSrcCSS='https://unpkg.com/leaflet@1.7.1/dist/leaflet.css'
-			leafletShaCSS='sha512-xodZBNTC5n17Xt2atTPuE1HxjVMSvLVW9ocqUKLsCC5CXdbqCmblAshOMAS6/keqq/sMZMZ19scR4PsZChSR7A=='
-			leafletSrcJS='https://unpkg.com/leaflet@1.7.1/dist/leaflet.js'
-			leafletShaJS='sha512-XQoYMqMTK8LvdxXYG3nZ448hOEQiglfqkJs1NOQV44cWnUrBc8PkAOcXy20w0vlaXaVUearIOBhiXZ5V3ynxwA=='
-			link=ET.Element('link', attrib={'rel':'stylesheet', 'href':leafletSrcCSS, 'integrity':leafletShaCSS, 'crossorigin':''})
-			head.append(link)
-			script=ET.Element('script', attrib={'src':leafletSrcJS, 'integrity':leafletShaJS, 'crossorigin':''})
-			head.append(script)
-		body=ET.Element('body')
-		html.append(body)
-
+		html=HubEauHTML(config)
 		if len(self)>0:
-			if config.mix:
-				self[0].initPlot(config)
-				figure=self[0].fig
-				axes=self[0].axes
+			if search:
+				mapid="searchmapid"
+				div=ET.Element('div',attrib={'id':'bid','class':'clearfix'})
+				html.addToBody(div)
+				p=ET.Element('h3')
+				div.append(p)
+				p=ET.Element('p')
+				div.append(p)
+				p.text=u"Recherche:"
+				if config.map:
+					p.text=u"%d stations trouvée(s), voir carte ci-dessous" % len(self)
+				else:
+					for s in self:
+						p=ET.Element('p')
+						div.append(p)
+						p.text=u"Station %s" % self[0].getName(withID=True)
 			else:
-				figure=None
-				axes=None
-			i=0
-			for s in self:		# parcours les stations
-				# créer le graphe de la station
-				s.createGraph(config,x_lim,y_lim,figure=figure,axes=axes,index=i)
-				if not config.mix:
-					s.saveGraph(config)
+				mapid="datamapid"
+				if config.mix:
+					self[0].initPlot(config)
+					figure=self[0].fig
+					axes=self[0].axes
+				else:
+					figure=None
+					axes=None
+				i=0
+				for s in self:		# parcours les stations
+					# créer le graphe de la station
+					s.createGraph(config,x_lim,y_lim,figure=figure,axes=axes,index=i)
+					if not config.mix:
+						s.saveGraph(config)
+						# incorpore le graphe (image) dans le HTML
+						iname=os.path.basename(s.imgname).split('.')[0]
+						div=ET.Element('div',attrib={'id':'bid','class':'clearfix'})
+						html.addToBody(div)
+						img=ET.Element('img',attrib={'id':'gid','src':s.imgname,'alt':iname,'class':'plot'})
+						div.append(img)
+						p=ET.Element('h3')
+						div.append(p)
+						p.text=u"Station %s" % s.getName(withID=True)
+						lastm=True
+						for ih in (4.0,24.0,168.0):	# calcul les variations pour les décalage horaires indiquées
+							a=self[0].analyze(h=ih)
+							if lastm:
+								last=a.getlast()
+								p=ET.Element('p')
+								div.append(p)
+								p.text=u"dernière mesure : %.3f m @ %s" % (last.v,last.t.strftime("%d/%m/%Y @ %H:%M"))
+								lastm=False
+							p=ET.Element('p')
+							div.append(p)
+							p.text=u"%d H variation: %+.3f m, vitesse: %+.1f cm/h" % (int(ih),a.getdeltavalue(),100.0*a.getspeed())
+					i=i+1
+				if config.mix:	# avec l'option lmix, il y a regroupement des graphes en 1 seul et les stats de la première station uniquement
+					self[0].saveGraph(config)
 					# incorpore le graphe (image) dans le HTML
-					iname=os.path.basename(s.imgname).split('.')[0]
+					iname=os.path.basename(self[0].imgname).split('.')[0]
 					div=ET.Element('div',attrib={'id':'bid','class':'clearfix'})
-					body.append(div)
-					img=ET.Element('img',attrib={'id':'gid','src':s.imgname,'alt':iname,'class':'plot'})
+					html.addToBody(div)
+					img=ET.Element('img',attrib={'id':'gid','src':self[0].imgname,'alt':iname,'class':'plot'})
 					div.append(img)
 					p=ET.Element('h3')
 					div.append(p)
-					p.text=u"Station %s" % s.getName(withID=True)
+					p.text=u"Station %s" % self[0].getName(withID=True)
 					lastm=True
-					for ih in (4.0,24.0,168.0):	# calcul les variations pour les décalage horaires indiquées
+					for ih in (4.0,24.0,168.0):
 						a=self[0].analyze(h=ih)
 						if lastm:
 							last=a.getlast()
@@ -969,90 +1005,80 @@ class StationList(list):
 						p=ET.Element('p')
 						div.append(p)
 						p.text=u"%d H variation: %+.3f m, vitesse: %+.1f cm/h" % (int(ih),a.getdeltavalue(),100.0*a.getspeed())
-				i=i+1
-			if config.mix:	# avec l'option lmix, il y a regroupement des graphes en 1 seul et les stats de la première station uniquement
-				self[0].saveGraph(config)
-				# incorpore le graphe (image) dans le HTML
-				iname=os.path.basename(self[0].imgname).split('.')[0]
-				div=ET.Element('div',attrib={'id':'bid','class':'clearfix'})
-				body.append(div)
-				img=ET.Element('img',attrib={'id':'gid','src':self[0].imgname,'alt':iname,'class':'plot'})
-				div.append(img)
-				p=ET.Element('h3')
-				div.append(p)
-				p.text=u"Station %s" % self[0].getName(withID=True)
-				lastm=True
-				for ih in (4.0,24.0,168.0):
-					a=self[0].analyze(h=ih)
-					if lastm:
-						last=a.getlast()
-						p=ET.Element('p')
-						div.append(p)
-						p.text=u"dernière mesure : %.3f m @ %s" % (last.v,last.t.strftime("%d/%m/%Y @ %H:%M"))
-						lastm=False
-					p=ET.Element('p')
-					div.append(p)
-					p.text=u"%d H variation: %+.3f m, vitesse: %+.1f cm/h" % (int(ih),a.getdeltavalue(),100.0*a.getspeed())
+			if config.map>0:	# création du code Javascript pour affichier la carte OSM via leaflet.js
+											# carte avec marqueurs des stations et recentrée pour afficher tous les marqueurs
+											# marquerus avec couleurs spécifique correspondante aux graphes
+				div=ET.Element('div',attrib={'id':'%s' % mapid})
+				html.addToBody(div)
+				script=ET.Element('script')
+				script.text="""
+					var mymap = L.map('%s').setView([0.0,0.0,],5);
+					L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', 
+						{ attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+						}).addTo(mymap);
+					var icon=new Array();""" % mapid
+				if len(self)>len(colorList):
+					mlength=0
+				else:
+					mlength=len(self)
+				if mlength==0:
+					script.text+="""
+					icon[%d] = new L.Icon({
+						iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-%s.png',
+						shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+						iconSize: [25, 41],	iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]});""" % (0,colorList[0])
+				else:
+					for i in range(mlength):
+						script.text+="""
+						icon[%d] = new L.Icon({
+							iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-%s.png',
+							shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+							iconSize: [25, 41],	iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]});""" % (i,colorList[i])
+				script.text+="""
+					var markers = L.featureGroup();"""
+				txt=""
+				colorIndex=0;
+				for s in self:		# pour chaque station crée un marqueur avec les infos de la station
+					if search:
+						txt+="""
+							m=L.marker([%.8f,%.8f], {icon: icon[%d]}).addTo(mymap);
+							m.bindPopup('%s:%s<br>(%s)');
+							m.addTo(markers);
+							""" % (s.latitude,s.longitude,colorIndex,s.id,s.nom,s.coursdeau)
+					else:
+						lastm=True
+						infoTxt=""
+						for ih in (4.0,24.0,168.0):
+							a=s.analyze(h=ih)
+							if lastm:
+								last=a.getlast()
+								infoTxt+=u"dernière mesure : %.3f m @ %s" % (last.v,last.t.strftime("%d/%m/%Y @ %H:%M"))
+								lastm=False
+							infoTxt+=u"<br>%d H variation: %+.3f m, vitesse: %+.1f cm/h" % (int(ih),a.getdeltavalue(),100.0*a.getspeed())
+						txt+="""
+							m=L.marker([%.8f,%.8f], {icon: icon[%d]}).addTo(mymap);
+							m.bindPopup('%s:%s<br>(%s)<br>%s');
+							m.addTo(markers);
+							""" % (s.latitude,s.longitude,colorIndex,s.id,s.nom,s.coursdeau,infoTxt)
+					if mlength>0:
+						colorIndex=colorIndex+1
+				txt+="mymap.fitBounds(markers.getBounds().pad(0.5));"
+				script.text+=txt
+				html.addToBody(script)
 		else:
 			p=ET.Element('h3')
-			body.append(p)
+			html.addToBody(p)
 			p.text=u"ERROR"
 			p=ET.Element('p')
-			body.append(p)
+			html.addToBody(p)
 			p.text=u"Aucune Station dans la liste, rien à afficher"
 		if _debug:
 			print(html)
-		if config.map and len(self)>0:	# création du code Javascript pour affichier la carte OSM via leaflet.js
-										# carte avec marqueurs des stations et recentrée pour afficher tous les marqueurs
-										# marquerus avec couleurs spécifique correspondante aux graphes
-			div=ET.Element('div',attrib={'id':'mapid'})
-			body.append(div)
-			script=ET.Element('script')
-			script.text="""
-				var mymap = L.map('mapid').setView([0.0,0.0,],5);
-				L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', 
-					{ attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-					}).addTo(mymap);
-				var icon=new Array();"""
-			for i in range(len(colorList)):
-				script.text+="""
-				icon[%d] = new L.Icon({
-					iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-%s.png',
-					shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
-					iconSize: [25, 41],	iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]});""" % (i,colorList[i])
-			script.text+="""
-				var markers = L.featureGroup();"""
-			txt=""
-			colorIndex=0;
-			for s in self:		# pour chaque station crée un marqueur avec les infos de la station
-				lastm=True
-				infoTxt=""
-				for ih in (4.0,24.0,168.0):
-					a=s.analyze(h=ih)
-					if lastm:
-						last=a.getlast()
-						infoTxt+=u"dernière mesure : %.3f m @ %s" % (last.v,last.t.strftime("%d/%m/%Y @ %H:%M"))
-						lastm=False
-					infoTxt+=u"<br>%d H variation: %+.3f m, vitesse: %+.1f cm/h" % (int(ih),a.getdeltavalue(),100.0*a.getspeed())
-				txt+="""
-					m=L.marker([%.8f,%.8f], {icon: icon[%d]}).addTo(mymap);
-					m.bindPopup('%s:%s<br>(%s)<br>%s');
-					m.addTo(markers);
-					""" % (s.latitude,s.longitude,colorIndex,s.id,s.nom,s.coursdeau,infoTxt)
-				colorIndex=colorIndex+1
-			txt+="mymap.fitBounds(markers.getBounds().pad(0.5));"
-			script.text+=txt
-			body.append(script)
 		if _debug:
 			print("html/path",path)
 			print("html/data")
 			print(html)
-		with open(path,'w') as f:
-			f.write("<!DOCTYPE html>\n")	# ajout du doctype en première ligne
-			if sys.version_info.major==2:
-				ET.ElementTree(html).write(f, encoding='utf-8',method='html')
-			else:
-				ET.ElementTree(html).write(f, encoding='unicode',method='html')
+		html.write(path)
 
 	def showMap(self,config):
 		""" showMap : affiche sur une carte OSM l'emplacement des stations de la liste
@@ -1072,8 +1098,11 @@ class StationList(list):
 		webbrowser.open(path,autoraise=True)
 
 class HubEauHTML():
+	""" HubEauHTML
+		Création et manipulation d'une page HTML via la librairie ET (xml.etree)
+	"""
 	def __init__(self,config):
-		""" Création de la structure de base d'uen page HTML Hubeau avec header et un corps vide
+		""" Création de la structure de base d'une page HTML Hubeau avec header et un corps vide
 			L'entête inclus les styles CSS Hubeau et la librairie javascript Leaflet
 			
 			self.html
@@ -1102,12 +1131,19 @@ class HubEauHTML():
 			script=ET.Element('script', attrib={'src':leafletSrcJS, 'integrity':leafletShaJS, 'crossorigin':''})
 			head.append(script)
 		self.body=ET.Element('body')
-		self.html.append(body)
+		self.html.append(self.body)
 	
-	def generate(self):
+	def addToBody(self,elem):
+		self.body.append(elem)
 		return
 
-	def write(self):
+	def write(self,path):
+		with open(path,'w') as f:
+			f.write("<!DOCTYPE html>\n")	# ajout du doctype en première ligne
+			if sys.version_info.major==2:
+				ET.ElementTree(self.html).write(f, encoding='utf-8',method='html')
+			else:
+				ET.ElementTree(self.html).write(f, encoding='unicode',method='html')
 		return
 
 class StationRequest():
@@ -1246,9 +1282,6 @@ def main(argv):
 
 	# 1. initialise et charger les paramètres '.INI)
 	config=Config()
-	# 2. charger les données (stations et mesures)
-	db=DataBase(config)
-	dbStationlist=db.load(config.idList)
 	# 3. charger les paramètres de la CLI (command line interface)
 	shortList=""	# chaine avec les arguments courts (1 lettre, suivi de : si valeur a passer)
 	longList=[]		# les des noms d'arguments long (suivi de = si valeur à passer)
@@ -1319,7 +1352,12 @@ def main(argv):
 	if len(idList)>maxGraph:
 		print("alerte : liste stations trop longue, max=",maxGraph)
 		idList=idList[:maxGraph]
+	# 2. charger les données (stations et mesures)
+	db=DataBase(config)
+	dbStationlist=db.load(idList)
 	# 4. oriente l'exécution selon les options choisies
+	if not os.path.exists(config.imgpath):		# créer le dosier pour sauvegarde les HTML et images
+		os.mkdir(config.imgpath)
 	if search:	# recherche de stations 
 		if _debug:
 			print("recherche")
@@ -1329,15 +1367,15 @@ def main(argv):
 			print(" (département):",depsearch)
 		request=StationRequest(config)
 		stationList=request.do(river=riversearch,station=namesearch,city=citysearch,departement=depsearch)
-		if config.map:
-			stationList.showMap(config)
+		stationList.generateHTML(config,search)	# créer le fichier HTMl de la liste des stations demandées
+		if config.show:
+			stationList.show(config)
 	else:	# pas de recherche, mettre à jour les données de(s) station(s)
-		if not os.path.exists(config.imgpath):		# créer le dosier pour sauvegarde les HTML et images
-			os.mkdir(config.imgpath)
 		if os.path.exists(config.imgpath):			# vérifier l'existance des chemins de sauvegarde
 			if os.path.isdir(config.imgpath):
 				# 4a. charger les dernières données de chaque station de la liste requête (hubeau)
-				print("Mise à jour des stations demandées :")
+				if config.download:
+					print("Mise à jour des stations demandées :")
 				stationList=StationList()
 				for item in idList :				# parcourir les stations candidates et mettre en liste les stations avec données
 					station=Station(item)
@@ -1351,8 +1389,6 @@ def main(argv):
 				stationList.generateHTML(config)	# créer le fichier HTMl de la liste des stations demandées
 				if config.show:
 					stationList.show(config)
-				elif config.map:
-					stationList.showMap(config)
 				# 4c. Mise à jour des données de la base de données locales
 				db.store(stationList)	# mémoriser les mises à jour
 			else:

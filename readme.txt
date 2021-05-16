@@ -85,7 +85,7 @@ qui pourrait vous intéresser localement puis de les configurer dans le fichier 
 
 Les stations de mesures du réseau HubEau sont identifiés par un code unique normalisé :
 	1 lettre suivi de 9 chiffres
-Les stations ont des données mises à jour entre 5 et 30 minutes.
+Les stations ont des données mises à jour entre 5 et 30 minutes suivant les stat.
 
 Le script fonctionne ainsi sous 3 modes :
 
@@ -104,11 +104,11 @@ Le script fonctionne ainsi sous 3 modes :
 	Dans une liste avec la virgule comme séparateur
 	Exemples :
 		voir les mesures de la Seine à Paris-Austerlitz des dernières 24 heures
-			python hubeau.py -sF700000103 -t24	
-		voir mesures de la Garonne à Toulouse (Pont Neuf) des dernièrs 10 jours (240 heures)	
-			python hubeau.py -sO200004001 -t240	
-		voir et comparer la situation de la Garonne à Bordeaux et Tarascon sur les dernières 48 heures
-			python hubeau.py -sO972001001,V720001002 -t48
+			python hubeau.py -sF700000103 -t1	
+		voir mesures de la Garonne à Toulouse (Pont Neuf) des dernièrs 10 jours
+			python hubeau.py -sO200004001 -t10	
+		voir et comparer la situation de la Garonne à Bordeaux et Toulouse sur la dernière semaine 
+			python hubeau.py -sO972001001,O200004001 -t 7
 
 * mode recherche station
 	Avec les arguments -r -n -c et -d on précise les critères de recherche de stations
