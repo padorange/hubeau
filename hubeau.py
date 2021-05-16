@@ -5,7 +5,7 @@
 from __future__ import print_function
 from __future__ import division
 
-__version__="0.9.5"
+__version__="0.9.6"
 __copyright__="Copyright 2010-2021, Pierre-Alain Dorange"
 __license__="BSD-3-Clauses"		# voir https://en.wikipedia.org/wiki/BSD_licenses
 __author__="Pierre-Alain Dorange"
@@ -82,8 +82,7 @@ __contact__="pdorange@mac.com"
 		Option OSM pour afficher le cours d'eau sur la carte ?
 
 	Bug
-		python hubeau.py -sO972001001,V720001002 : provoque une erreur HubEau (return 400 : invalid request)
-			date debut = 2020-06-20
+		gérer le code erreur 400 (date trop ancienne et mieux retourner les erreurs en HTML
 """
 
 # astuce unicode (Python 2.7.x) : permet de définir unicode comme encodage par défaut
@@ -259,7 +258,7 @@ class Config():
 		except:
 			(w,h)=(10.0,3.0)
 		self.mixplotsize=(0.01*w,0.01*h)	# convert pixels to inches
-		if _verbose: 
+		if _debug: 
 			print(self)
 		return
 
@@ -299,7 +298,7 @@ class DataBase():
 				# requete MySQL pour les données de la staion
 				results=self.session.query(StationData).filter(StationData.station==s).all()
 				if _verbose or _debug:
-					print("chargement de %s (%d mesures(s))" % (station.getID(),len(results)))
+					print("  - chargement de %s (%d mesures(s))" % (station.getID(),len(results)))
 				# charger les données en mémoire
 				for r in results:
 					r.dbInit(2)
@@ -455,9 +454,9 @@ class Station(Base):
 			print(u"ERROR, not the same station")
 		return 0	# n'existe pas (il faudra l'ajouter)
 
-	def showName(self,withID=False,withDep=True):
+	def showName(self,withID=False,withDep=True,prefix=""):
 		""" Affiche le nom de la station avec les mêmes options que getName"""
-		print(u"Station:",self.getName(withID,withDep))
+		print(u"%sStation: %s" % (prefix,self.getName(withID,withDep)))
 
 	def showInfo(self):
 		""" Affiche les informations détaillées de la station """
@@ -469,10 +468,15 @@ class Station(Base):
 		print(u"\tLocalisation: %.4f, %.4f" % (self.longitude,self.latitude))
 		print(u"\tMesures: %d" % len(self.data))
 
-	def showData(self):
+	def showData(self,limit=0):
 		""" Afficher toutes les mesures disponibles """
 		print("\tDonnées (date, hauteur) %s mesure(s)" % len(self.data))
-		for d in self.data:
+		if limit<=0:
+			datas=self.data
+		else:
+			self.data.sort(key=lambda item: item.t)
+			datas=self.data[-limit:]
+		for d in datas:
 			print("\t%s\t%.2f" % (d.t.strftime("%d/%m/%Y @ %H:%M"),d.v))
 				
 	def showSummarize(self):
@@ -749,15 +753,12 @@ class Station(Base):
 			Enchaine les fonctions de téléchargement de l'objet Station pour avoir toutes les données
 		"""
 
-		# 1. Récupère les informations de la station de mesure
-		self.downloadInfo()
-		if config.info:
-			self.showInfo()
-		else:
-			self.showName(withID=True)
-
-		# 2. Récupère les mesures de la station (date+hauteur)
 		if config.download:
+			# 1. Récupère les informations de la station de mesure
+			self.downloadInfo()
+			if not config.info:
+				self.showName(withID=True,prefix="  - ")
+			# 2. Récupère les mesures de la station (date+hauteur)
 			if len(self.data)>0:	# extrait la dernière date des données locales
 				self.data.sort(key=lambda item: item.t)
 				date=self.data[-1].t
@@ -1280,6 +1281,7 @@ def show_usage():
 def main(argv):
 	global _debug
 
+	print("--",__file__,__version__,"-----------------")
 	# 1. initialise et charger les paramètres '.INI)
 	config=Config()
 	# 3. charger les paramètres de la CLI (command line interface)
