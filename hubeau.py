@@ -1,12 +1,13 @@
-#! /usr/bin/python2
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-# python 3 préparation (future)
-from __future__ import print_function
-from __future__ import division
+# python 2-3 compatibility
+# from __future__ import print_function
+# from __future__ import division
 
-__version__="0.9.6"
-__copyright__="Copyright 2010-2021, Pierre-Alain Dorange"
+__application__="hubeau.py"
+__version__="0.9.8"
+__copyright__="Copyright 2010-2023, Pierre-Alain Dorange"
 __license__="BSD-3-Clauses"		# voir https://en.wikipedia.org/wiki/BSD_licenses
 __author__="Pierre-Alain Dorange"
 __contact__="pdorange@mac.com"
@@ -14,27 +15,31 @@ __contact__="pdorange@mac.com"
 """
 	hubeau.py
 	-----------------------------------------------------------------------------------------
-	Réalisé avec Python 3.7.x / 2.7.x, testé sur Debian 10 & MacOS X 10.10
+	Réalisé avec Python 3.11.x, testé sur Debian 12 (bookworm)
 	-----------------------------------------------------------------------------------------
 	Permet de suivre les mesures de hauteur des cours d'eau Français diffusée par l'API HubEau :
 		- Télécharge les dernières mesures (API HubEau + json)
-		- Stocke les mesures en local (sqlite + sqlalchemy) permet un historique
+		- Stocke les mesures en local (sqlite + sqlalchemy), permet un historique
 		- Permet de faire des graphiques (matplotlib)
 		- Génère une page HTML5+CSS+JavaScript de suivi (ElementTree)
 
-	Voir readme.txt pour plus de détails
+	Voir readme pour plus de détails
 
 	-- Licence (BSD-3-Clauses : https://en.wikipedia.org/wiki/BSD_licenses) ------------------
-	Copyright (c) 2010-2021, Pierre-Alain Dorange
+	Copyright (c) 2010-2024, Pierre-Alain Dorange
 	All rights reserved.
 
-	-- Modules spécifiques à installer (licences : voir readme.txt) ---------------------------
-	Requests 2.21 (https://requests.readthedocs.io/en/master/)
-	MatPlotLib 2.2.x (https://matplotlib.org/)
-	SQLAlchemy 1.4.x : (https://www.sqlalchemy.org/)
+	-- Modules spécifiques à installer (licences : voir readme) ---------------------------
+	Requests 2.28.x (https://requests.readthedocs.io/en/master/)
+		permet de simplifier la gestion HTML des données
+	MatPlotLib 3.3.x (https://matplotlib.org/)
+		permet de réaliser de jolis graphiques
+	SQLAlchemy 1.4.6 : (https://www.sqlalchemy.org/)
+		permet de simplifier la gestion SQL en faisant correspondre des objects Python avec des tables SQL
+		pour effectuer une lecture+sauvegarde simplifiée des deonnées dans une base mysql
 
 	-- Modules spécifiques utilisés par la page HTML (licence : voir readme.txt) --------------
-	leaflet.js 1.7.x (https://leafletjs.com/)
+	leaflet.js 1.9.x (https://leafletjs.com/)
 
 	-- Modules standards utilisés (Python) ----------------------------------------------------
 	sqlite : Base de données SQL locale mono-utilisateur
@@ -61,7 +66,7 @@ __contact__="pdorange@mac.com"
 		améliorations affichage du graphique
 		amélioration des performances
 	0.9 : juin-octobre 2020
-		amélioration gestion des arguments de la ligne de commande (par bascule)
+		amélioration gestion des arguments de la ligne de commande (par bascule ON/OFF)
 		recherche de stations multi-critères (cours d'eau, nom, commune, département)
 		ajout carte openstreetmap des stations mesurées et/ou résultats via leaflet.js
 	0.9.4 : janvier-avril 2021
@@ -70,17 +75,31 @@ __contact__="pdorange@mac.com"
 		couleurs homogène entre les graphes et Leaflet
 	0.9.5 : mai 2021
 		compatibilité Python 2.7.x et 3.7.x
-		passage à SQLAlchemy 1.4.x
 		affichage résultats recherche sur une carte
 		optimisation démarrage : ne charger que les données nécessaires à la session
 		gestion de la limite des 30 jours de l'API HubEau
-
+	0.9.6 : janvier 2023
+		optimisation mise à jour de la base de données (station : downloaddata + checkdata)
+		intégration de Leaflet 1.9.3 (aucun changement pour hubeau.py)
+		intégration de matplotlib 3 (aucun changement pour hubeau.py)
+	0.9.7 : novembre 2023
+		optimisation affichage avancement du chargement
+		correction affichage statistiques à coté du graphique en mode mix=OFF
+		vérification compatibilité avec requests 2.28, matplotlib 3.6.3 et sqlalchemy 1.4.46
+		préparation pour évoluer vers le futur sqlalchemy 2
+	0.9.8 : avril 2024
+		optimisation chargement de la base de données (suivant la longueur du graphique)
+		optimisation de l'axe >X pour les périodes longues
 	A Faire
 		Mise à jour des infos stations dans la base lors de chargement des données
 		Faire évoluer les librairies vers plus récents (request, sqlalchemy, matplotlib...)
+			SQLAlchemy 1.4.6 vers 2.0
+			MatPlotLib 3.3 vers 3.8
+			Request 2.28 vers 2.31
+		Option pour compacter les anciennes données
+		Option pour simplifer les graphiques longs avec moyennage des données
 		Gestion d'autres API HubEau : température, piezomètre, qualité... ?
 		Option OSM pour afficher le cours d'eau sur la carte ?
-
 	Bug
 		gérer le code erreur 400 (date trop ancienne et mieux retourner les erreurs en HTML
 """
@@ -92,7 +111,6 @@ if sys.version_info.major==2:
 	sys.setdefaultencoding('utf8')
 
 # -- Modules standard Python -------------------------------------------------------------------
-
 import getopt					# module interface avec le système
 import os.path					# module interface les système de fichier (gestion chemains)
 import time, datetime			# module de gestion des dates au format unix
@@ -108,7 +126,7 @@ from xml.etree import ElementTree as ET		# module pour gérer le format XML (ici
 import sqlalchemy				# modules d'abstraction SQL (ici utilisé pour stocker les données via SQLite)
 import sqlalchemy.orm					# mapper configuration ORM
 import sqlalchemy.ext.declarative		# extension ORM
-								# matplotlib 2.x : librairie de création de graphes : https://matplotlib.org/
+								# matplotlib 3.x : librairie de création de graphes : https://matplotlib.org/
 import matplotlib.pyplot as plt			# module principal pour créer des graphes
 import matplotlib.dates as pltdates		# module pour gérer des dates dans les graphes
 import matplotlib.style as pltstyle		# module pour gérer des styles dans les graphes
@@ -117,7 +135,6 @@ import matplotlib.ticker as pltticker	# module pour gérer les formattages de do
 import requests					# module intelligent de gestion du protocole HTTP et JSON
 
 # -- Constantes et Globales ----------------------------------------------------------------------
-
 _debug=False				# active le mode debug
 _debug_update=False			# mode debug pour les mise à jour de données
 _debug_sql=False			# mode debug pour les appels SQL
@@ -128,7 +145,7 @@ user_agent="%s/%s" % (__file__,__version__)
 # Nombre maximal de stations affichable sur un seul graphique
 maxGraph=6
 # marqueurs colorés pour Leaflet : https://github.com/pointhi/leaflet-color-markers
-colorList=("blue","orange","green","violet","red","grey","gold","yellow","violet","black")
+colorList=("blue","orange","green","violet","yellow","red","grey","gold","black")
 
 default_directory="html"
 default_config="hubeau.ini"
@@ -147,7 +164,7 @@ path=os.path.dirname(os.path.abspath(__file__))
 os.chdir(path)	
 
 # sqlalchemy : prépare les classes globales nécessaires à la gestion ORM de SQLAlchemy
-Base=sqlalchemy.ext.declarative.declarative_base()
+Base=sqlalchemy.orm.declarative_base()
 
 # -- Classes ---------------------------------------------------------------------------------------
 
@@ -163,6 +180,7 @@ class Config():
 		self.show=True				# active l'affichage fichier HTML crée avec les résultats
 		self.map=False
 		self.css=default_css		# feuille de style CSS pour le rendu HTML
+		self.plotdays=0
 		
 		# chargement des paramaètre depuis le fichier de configuration (hubeau.ini)
 		# avec valeurs par défaut si erreur de chargement ou valeur non définie
@@ -282,13 +300,19 @@ class DataBase():
 	def __init__(self,config):
 		""" initialise le moteur SQLite via SQLAlchemy """
 		Engine=sqlalchemy.create_engine("sqlite:///%s" % config.dbPath,echo=_debug_sql)
+		self.plotdays=config.plotdays
 		self.engine=Engine
 		Base.metadata.create_all(self.engine)
 		self.session=sqlalchemy.orm.sessionmaker(bind=Engine)()
 
 	def load(self,idList=[]):
-		""" charger les données, pour les stations requises (idList) """
+		""" charger les données, pour les stations requises (idList) 
+			optimisation pour ne charger que les données nécessaire pour l'affichage du graphique (plotdays)
+		"""
 		stations=StationList()
+		dt=datetime.timedelta(days=self.plotdays+1)
+		t0=datetime.datetime.utcnow()
+		tm=t0-dt
 		print("Chargement partiel de la base de données (%d station(s))" % len(idList))
 		for s in idList:	# pour chaque station
 			station=self.session.query(Station).filter(Station.id==s).one_or_none()
@@ -296,7 +320,7 @@ class DataBase():
 				station.dbInit(2)
 				stations.append(station)
 				# requete MySQL pour les données de la staion
-				results=self.session.query(StationData).filter(StationData.station==s).all()
+				results=self.session.query(StationData).filter(StationData.station==s,StationData.t>=tm).all()
 				if _verbose or _debug:
 					print("  - chargement de %s (%d mesures(s))" % (station.getID(),len(results)))
 				# charger les données en mémoire
@@ -318,6 +342,8 @@ class DataBase():
 			for data in station.data:
 				if data.state==0:			# nécessite un ajout (station.data)
 					self.session.add(data)
+				elif data.state==1:			# nécessite un ajout (station.data)
+					self.session.update(data)
 			self.session.commit()
 
 class StationData(Base):
@@ -442,10 +468,15 @@ class Station(Base):
 		self.data.append(data)
 
 	def checkData(self,data):
-		""" vérifie la présence de data dans la liste existante et retourne l'état"""
+		""" vérifie la présence de data dans la liste existante et retourne l'état 
+			0.9.6 : optimisation en parcourant la liste depuis le fin (liste trié par ordre chronologique)
+					et en stoppant dès que les dates sont inférieure à la date de la data.
+		"""
 		if data.station==self.id:
-			for d in self.data:
-				if d.t==data.t:
+			for d in self.data[::-1]:
+				if d.t<data.t:
+					break
+				elif d.t==data.t:
 					if abs(d.v-data.v)<0.001:
 						return 2	# existe déjà (rien à faire)
 					else:
@@ -535,7 +566,7 @@ class Station(Base):
 			Recupère par défaut toutes les mesures ou à partir d'une date données (date)
 				- pagesize permet de préciser le nombre de données par pages.
 			Gère le retour de données en multi-pages
-			Ne gère pas les durée inter-mesure, la limite size est définit en nombre de mesures pas en temps
+			Ne gère pas les durées inter-mesure, la limite size est définit en nombre de mesures pas en temps
 			certaines stations ont des mesures toutes les heures, d'autres toutes les demi-heures
 		"""
 		hubeauHydroAPI="http://hubeau.eaufrance.fr/api/v1/hydrometrie/observations_tr"
@@ -548,6 +579,7 @@ class Station(Base):
 			urldata="%s?code_entite=%s&size=%d&grandeur_hydro=H&fields=date_obs,resultat_obs"
 			url=urldata % (hubeauHydroAPI,self.id,pagesize)
 		page=1
+		print("\t",end="")
 		while url:
 			if _debug:
 				print("url (%d):" % page,url)
@@ -555,16 +587,17 @@ class Station(Base):
 			if r.status_code<=206:
 				content=r.headers['content-type']
 				if 'json' in content:
-					json=r.json()				# converti les données brutes en objet JSON
+					json=r.json()			# converti les données brutes en objet JSON
 					v=json["api_version"]
 					v=v.split('.')
-					if v[0]=='1':
+					if v[0]=='1':	# vérifie la version API
 						next=json["next"]
 						if next and _debug:
 							print("> chargement page suivante")
 						datas=json["data"]			# récupère la parties données du JSON
 						if _debug:
 							print("downloaded datas:",len(datas))
+						print(".",end="",flush=True)
 						for data in datas:					# parcourir les données (couple date-heure et valeur de mesure)
 							datetimeStr=data['date_obs']				# extraire la valeur date-heure
 							time_format = "%Y-%m-%dT%H:%M:%SZ"			
@@ -580,7 +613,7 @@ class Station(Base):
 							elif d.state==1:
 								print("ERROR data need updates", d)
 					else:
-						print("ERROR : API version not handled",v)		
+						print("ERROR : API version not handled",v)
 				else:
 					print("ERROR : La réponse n'est pas au format JSON :",content)
 				page=page+1
@@ -589,6 +622,7 @@ class Station(Base):
 				print("url:",url)
 				print("HTTP Status error :",r.status_code)
 				url=None
+		print()
 
 	def initPlot(self,config):
 		""" crée un objet plot pour pouvoir dessiner un ou plusieurs graphes dedans """
@@ -618,7 +652,6 @@ class Station(Base):
 			for d in self.data:
 				if d.t>=x_lim[0] and d.t<=x_lim[1]:
 					datas.append(d)
-		#datas=sorted(self.data,key=lambda item: item.t)		# trier les mesures par ordre temporel (t=)
 		if x_lim:	# set x min/max to x_lim parameter if set, otherwise to data min/max
 			(xmin,xmax)=x_lim
 		else:
@@ -659,13 +692,16 @@ class Station(Base):
 			fmt='%d/%m/%y %H:%M'
 			majorloc=pltdates.AutoDateLocator(minticks=2,maxticks=5)
 			minorloc=pltdates.HourLocator()
-			mark='o'
+			mark='o-'
 		else:			# sinon n'afficher que les jours (pas les heures) + sans marqueur
 			fmt='%d/%m/%y'
-			majorloc=pltdates.AutoDateLocator(minticks=2,maxticks=7)
-			minorloc=pltdates.DayLocator()
-			mark=''
-
+			mark='-'
+			if dj<200:
+				majorloc=pltdates.AutoDateLocator(minticks=2,maxticks=7)
+				minorloc=pltdates.DayLocator()
+			else:
+				majorloc=pltdates.AutoDateLocator(minticks=2,maxticks=7)
+				minorloc=pltdates.MonthLocator()
 		# 2. Créer le graphique (pyplot)
 
 		# créer le graphique et son style de base + ajouter les données
@@ -682,7 +718,6 @@ class Station(Base):
 			else:
 				self.initPlot(config)
 
-		#plt.title(self.getName(withID=True),fontsize=config.titlesize)
 		plt.grid(config.grid)
 		if config.mix:	# option mix : regroupement de toutes les stations sur un seul graphe
 			if index==0:	# index 0 => courbe principale (remplissage)
@@ -694,12 +729,13 @@ class Station(Base):
 				fcolor=None
 				gwidth=1.0
 			glabel=str(self.id)
-		else:	# pas dop'tion mix : chaque courbe a son propre graphe
+		else:	# pas d'option mix : chaque courbe a son propre graphe
 			gcolor=config.grafcolor
 			glabel=config.glabel
 			fcolor=config.fillcolor
-			gwidth=2.0
-		plt.plot_date(xdata,ydata,color=gcolor,label=glabel,linestyle='solid',linewidth=gwidth,marker=mark)
+			gwidth=1.0
+		# dessine les données dans le graphe
+		plt.plot_date(xdata,ydata,fmt=mark,color=gcolor,label=glabel,linewidth=gwidth)
 		if fcolor:
 			self.axes.fill_between(xdata,0,ydata,facecolor=fcolor)
 		# formatte l'axe des X (dates)
@@ -752,7 +788,7 @@ class Station(Base):
 			en utilisant le protocole v1 de l'API hubeau
 			Enchaine les fonctions de téléchargement de l'objet Station pour avoir toutes les données
 		"""
-
+		
 		if config.download:
 			# 1. Récupère les informations de la station de mesure
 			self.downloadInfo()
@@ -768,10 +804,8 @@ class Station(Base):
 					date=None
 			else:
 				date=None
-			if _debug:
-				print("download date from:",date,"pagesize:",config.datasize)
+			print("      download from:",date,"pagesize (max):",config.datasize)
 			self.downloadData(date,config.datasize)
-
 		# 3. Afficher les données
 		if len(self.data)>0:
 			if config.info:
@@ -959,7 +993,7 @@ class StationList(list):
 				for s in self:		# parcours les stations
 					# créer le graphe de la station
 					s.createGraph(config,x_lim,y_lim,figure=figure,axes=axes,index=i)
-					if not config.mix:
+					if not config.mix:	# sans option mix, chaque station a son propre graph et propre stats
 						s.saveGraph(config)
 						# incorpore le graphe (image) dans le HTML
 						iname=os.path.basename(s.imgname).split('.')[0]
@@ -970,9 +1004,18 @@ class StationList(list):
 						p=ET.Element('h3')
 						div.append(p)
 						p.text=u"Station %s" % s.getName(withID=True)
+						p=ET.Element('p')
+						div.append(p)
+						p.text=u"Liens : "
+						a=ET.Element('a',attrib={'href':'https://www.vigicrues.gouv.fr/niv3-station.php?CdStationHydro=%s' % s.getID()})
+						p.append(a)
+						a.text=u"VigieCrue"
+						a=ET.Element('a',attrib={'href':'https://www.hydro.eaufrance.fr/stationhydro/%s/fiche' % s.getID()})
+						p.append(a)
+						a.text=u"Fiche Station"
 						lastm=True
 						for ih in (4.0,24.0,168.0):	# calcul les variations pour les décalage horaires indiquées
-							a=self[0].analyze(h=ih)
+							a=s.analyze(h=ih)
 							if lastm:
 								last=a.getlast()
 								p=ET.Element('p')
@@ -994,6 +1037,15 @@ class StationList(list):
 					p=ET.Element('h3')
 					div.append(p)
 					p.text=u"Station %s" % self[0].getName(withID=True)
+					p=ET.Element('p')
+					div.append(p)
+					p.text=u"Liens : "
+					a=ET.Element('a',attrib={'href':'https://www.vigicrues.gouv.fr/niv3-station.php?CdStationHydro=%s' % self[0].getID()})
+					p.append(a)
+					a.text=u"VigieCrue"
+					a=ET.Element('a',attrib={'href':'https://www.hydro.eaufrance.fr/stationhydro/%s/fiche' % self[0].getID()})
+					p.append(a)
+					a.text=u"Fiche Station"
 					lastm=True
 					for ih in (4.0,24.0,168.0):
 						a=self[0].analyze(h=ih)
@@ -1122,11 +1174,16 @@ class HubEauHTML():
 		style=ET.Element('style')
 		style.text=config.css
 		head.append(style)
-		if config.map:
-			leafletSrcCSS='https://unpkg.com/leaflet@1.7.1/dist/leaflet.css'
+		if config.map:		# code pour la librairie Leaflet (en ligne)
+			"""leafletSrcCSS='https://unpkg.com/leaflet@1.7.1/dist/leaflet.css'
 			leafletShaCSS='sha512-xodZBNTC5n17Xt2atTPuE1HxjVMSvLVW9ocqUKLsCC5CXdbqCmblAshOMAS6/keqq/sMZMZ19scR4PsZChSR7A=='
 			leafletSrcJS='https://unpkg.com/leaflet@1.7.1/dist/leaflet.js'
 			leafletShaJS='sha512-XQoYMqMTK8LvdxXYG3nZ448hOEQiglfqkJs1NOQV44cWnUrBc8PkAOcXy20w0vlaXaVUearIOBhiXZ5V3ynxwA=='
+			"""
+			leafletSrcCSS='https://unpkg.com/leaflet@1.9.3/dist/leaflet.css'
+			leafletShaCSS='sha256-kLaT2GOSpHechhsozzB+flnD+zUyjE2LlfWPgU04xyI='
+			leafletSrcJS='https://unpkg.com/leaflet@1.9.3/dist/leaflet.js'
+			leafletShaJS='sha256-WBkoXOwTeyKclOHuWtc+i2uENFpDZ9YPdf5Hf+D7ewM='
 			link=ET.Element('link', attrib={'rel':'stylesheet', 'href':leafletSrcCSS, 'integrity':leafletShaCSS, 'crossorigin':''})
 			head.append(link)
 			script=ET.Element('script', attrib={'src':leafletSrcJS, 'integrity':leafletShaJS, 'crossorigin':''})
@@ -1240,7 +1297,7 @@ class StationRequest():
 		return result
 
 # --  Aide  --------------------------------------------------------------------------------
-#			lettre-code / nom-long / type de valeur / valeur par défaut / aide
+#			lettre-code : {nom-long, type de valeur, valeur par défaut, aide}
 arguments={	'h':("help",None,None,"aide"),
 			'r':("findriver","<nom>",None,"cherche les stations se trouvant sur le cours d'eau"),
 			'n':("findname","<nom>",None,"cherche les stations dont le nom correspond"),
@@ -1250,9 +1307,9 @@ arguments={	'h':("help",None,None,"aide"),
 			't':("time","<d>","10","nombre de jours a représenter sur la graphique"),
 			'g':("show",None,"Non","Affiche le graphique dans le navigateur"),
 			'd':("database",None,"Non","Ne pas télécharger les mises à jour de données"),
-			'm':("mix",None,"Non","Fusionne les données en un seul graphique"),
+			'm':("mix",None,"Oui","Fusionne les données en un seul graphique"),
 			'i':("info",None,"Non","Affiche les informations des stations interrogées"),
-			'o':("osm",None,"Non","Affiche la carte avec les stations localisées"),
+			'o':("osm",None,"Oui","Affiche la carte avec les stations localisées"),
 			'x':("debug",None,"Non","Active le mode deboggage")
 		}
 
@@ -1284,7 +1341,7 @@ def main(argv):
 	print("--",__file__,__version__,"-----------------")
 	# 1. initialise et charger les paramètres '.INI)
 	config=Config()
-	# 3. charger les paramètres de la CLI (command line interface)
+	# 2. charger les paramètres de la CLI (command line interface)
 	shortList=""	# chaine avec les arguments courts (1 lettre, suivi de : si valeur a passer)
 	longList=[]		# les des noms d'arguments long (suivi de = si valeur à passer)
 	for a in arguments:
@@ -1354,7 +1411,7 @@ def main(argv):
 	if len(idList)>maxGraph:
 		print("alerte : liste stations trop longue, max=",maxGraph)
 		idList=idList[:maxGraph]
-	# 2. charger les données (stations et mesures)
+	# 3. charger les données (stations et mesures)
 	db=DataBase(config)
 	dbStationlist=db.load(idList)
 	# 4. oriente l'exécution selon les options choisies
@@ -1377,7 +1434,7 @@ def main(argv):
 			if os.path.isdir(config.imgpath):
 				# 4a. charger les dernières données de chaque station de la liste requête (hubeau)
 				if config.download:
-					print("Mise à jour des stations demandées :")
+					print("Mise à jour des stations :")
 				stationList=StationList()
 				for item in idList :				# parcourir les stations candidates et mettre en liste les stations avec données
 					station=Station(item)
@@ -1392,6 +1449,7 @@ def main(argv):
 				if config.show:
 					stationList.show(config)
 				# 4c. Mise à jour des données de la base de données locales
+				print("Sauvegarde des nouvelles données")
 				db.store(stationList)	# mémoriser les mises à jour
 			else:
 				print("erreur : le chemin de sauvegarde n'est pas vers un répertoire")
