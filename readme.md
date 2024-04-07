@@ -1,12 +1,13 @@
 # hubeau.py
 ----
 Language : Python 3.7+ ou 2.7
-Génère un résultat en HTML5, CSS et Javascript dans un dossier "html" avec un graphique du suivi de la hauteur d'un ou plusieurs points de mesure sur une rivière avec une carte et les derniers relevés.
-Utilise les librairies Leaflet (javascript) pour créer une carte via les données OpenStreetMap (OSM)
+Suivi des hauteurs d'eau d'une reivière grace aux données libres du service public hubeau.
+Génère un résultat en HTML5, CSS et Javascript dans un dossier "html" avec une image graphique du suivi de la hauteur d'un ou plusieurs points de mesure sur une rivière avec une carte et les dernières mesures de relevés.
+Utilise les librairies Leaflet (javascript) pour créer une carte html via les données OpenStreetMap (OSM)
 
 ## Introduction
 Script Python permettant d'interroger l'API publique française "hubeau" (hydrométrie). 
-Permet de suivre les mesures de hauteur des cours d'eau Français diffusée par l'API HubEau.
+Permet de suivre les mesures de hauteur des cours d'eau Français diffusée par cette API.
 Données diffusées en quasi temps réel.
 
 - Télécharge les dernières mesures d'un ou plusieurs points de mesures (API HubEau via le format json)
@@ -66,7 +67,7 @@ Lien : [sqlalchemy](https://www.sqlalchemy.org/) / Licence : [MIT](https://www.s
 * Installation (Debian) : apt install python3-sqlalchemy
 Copyright 2005-2021 SQLAlchemy authors and contributors
 
-### Outils additionnels (utilisés par la page HTML)
+### Outils additionnels (utilisés par la page HTML, sans installation)
 Ces outils sont utilisés par la page HTML généré via internet, rien à installer.
 
 #### OpenStreetMap ou OSM
@@ -90,7 +91,7 @@ Icônes de marqueurs de couleurs pour cartes leaflet
 ## Utilisation
 
 Aucune interface GUI, utilisable uniquement depuis la ligne de commande (CLI).
-Ce logiciel est destiné a être utilisé sous forme de tache de fond système (ex. Cron) ou lancer manuellement dans la ligne de commande. Dans cet usage de base le logiciel utilise les données du fichier de configration *hubeau.ini* pour mettre à jour les données des stations configurées et afficher un fichier HTML présentant l'historique des mesures.
+Ce logiciel est destiné a être utilisé sous forme de tache de fond système (ex. Cron) ou lancer manuellement dans la ligne de commande. Dans cet usage de base le logiciel utilise les données du fichier de configuration *hubeau.ini* pour mettre à jour les données des stations configurées et afficher un fichier HTML présentant l'historique des mesures.
 
 L'interface CLI permet aussi de faire des recherches de stations dans l'API HubEau ou d'afficher les données de stations spécifiques. C'est le moyen de trouver les stations qui pourrait vous intéresser localement puis de les configurer dans le fichier *hubeau.ini*
 
@@ -100,7 +101,7 @@ Les stations ont des données mises à jour entre 5 et 30 minutes suivant les st
 Le script fonctionne ainsi sous 3 modes :
 
 #### mode automatique
-Sans l'argument -s (ne précise pas la ou les stations) le script utilise alors le fichier de configuration (*hubeau.ini*) et réalise les opérations de mise à jour et d'affichage des courbes de suivi des cours d'eau qui y sont paramétrées.
+Sans aucun argument le script utilise alors le fichier de configuration (*hubeau.ini*) et réalise les opérations de mise à jour et d'affichage des courbes de suivi des cours d'eau qui y sont paramétrées.
 
 Exemples :
 
@@ -108,9 +109,9 @@ Exemples :
 
 >	python hubeau.py
 
-- afficher (sans mettre à jour) les données des stations hubeau.ini pour les 10 derniers jours
+- afficher (sans mettre à jour) les données des stations hubeau.ini pour les 1000 derniers jours
 
->	python hubeau.py -d -t10
+>	python3 hubeau.py -d -t1000
 
 #### mode semi-automatique
 Avec l'argument -s on précise la ou les stations a interroger et à afficher (liste avec la virgule comme séparateur). Le fichier de configuration *hubeau.ini* n'est alors pas utilisé.
@@ -119,15 +120,15 @@ Exemples :
 
 - voir les mesures de la Seine à Paris-Austerlitz des dernières 24 heures
 
-> 	python hubeau.py -sF700000103 -t1	
+> 	python3 hubeau.py -sF700000103 -t1	
 
 - voir mesures de la Garonne à Toulouse (Pont Neuf) des derniers 10 jours
 
-> python hubeau.py -sO200004001 -t10	
+> python3 hubeau.py -sO200004001 -t10	
 
 - voir et comparer la situation de la Garonne à Bordeaux et Toulouse sur la dernière semaine 
 
-> python hubeau.py -sO972001001,O200004001 -t7
+> python3 hubeau.py -sO972001001,O200004001 -t7
 
 #### mode recherche station
 Avec les arguments -r -n -c et -d on précise les critères de recherche de stations.
@@ -137,19 +138,19 @@ Exemples :
 
 - rechercher les stations du fleuve Garonne
 
-> python hubeau.py -rGaronne
+> python3 hubeau.py -rGaronne
 
 - rechercher les stations du département de la Charente (16)
 
-> python hubeau.py -e16
+> python3 hubeau.py -e16
 
 - rechercher les stations de la ville de Bordeaux (code INSEE 33063)
 
-> python hubeau.py -c33063
+> python3 hubeau.py -c33063
 
 - rechercher les stations du fleuve Loire dans le département 37 :
 
-> python hubeau.py -rLoire -e37
+> python3 hubeau.py -rLoire -e37
 
 ### Paramètres de ligne de commande :
 	-h affiche l'aide

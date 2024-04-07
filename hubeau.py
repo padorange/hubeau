@@ -7,7 +7,7 @@
 
 __application__="hubeau.py"
 __version__="0.9.8"
-__copyright__="Copyright 2010-2023, Pierre-Alain Dorange"
+__copyright__="Copyright 2010-2024, Pierre-Alain Dorange"
 __license__="BSD-3-Clauses"		# voir https://en.wikipedia.org/wiki/BSD_licenses
 __author__="Pierre-Alain Dorange"
 __contact__="pdorange@mac.com"
